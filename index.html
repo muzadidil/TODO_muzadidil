@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TaskFlow — TODO</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">TaskFlow</span>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-filter="all">
+          <span class="nav-icon">☰</span> Semua Tugas
+        </button>
+        <button class="nav-item" data-filter="today">
+          <span class="nav-icon">◷</span> Hari Ini
+        </button>
+        <button class="nav-item" data-filter="active">
+          <span class="nav-icon">○</span> Belum Selesai
+        </button>
+        <button class="nav-item" data-filter="completed">
+          <span class="nav-icon">✓</span> Selesai
+        </button>
+      </nav>
+
+      <div class="nav-section-title">Kategori</div>
+      <nav class="nav categories" id="categoryList">
+        <button class="nav-item cat-item active" data-category="all">
+          <span class="cat-dot" style="background:#6b7280"></span> Semua
+        </button>
+        <button class="nav-item cat-item" data-category="kerja">
+          <span class="cat-dot" style="background:#60a5fa"></span> Kerja
+        </button>
+        <button class="nav-item cat-item" data-category="pribadi">
+          <span class="cat-dot" style="background:#34d399"></span> Pribadi
+        </button>
+        <button class="nav-item cat-item" data-category="belajar">
+          <span class="cat-dot" style="background:#fbbf24"></span> Belajar
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="progress-card">
+          <div class="progress-card-label">Progress Hari Ini</div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="sidebarProgressFill"></div>
+          </div>
+          <div class="progress-card-value" id="sidebarProgressText">0%</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="viewTitle">Semua Tugas</h1>
+          <p id="viewSubtitle">Kelola semua tugasmu di satu tempat</p>
+        </div>
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+          <input type="text" id="searchInput" placeholder="Cari tugas..." />
+        </div>
+      </header>
+
+      <section class="stats-row">
+        <div class="stat-card">
+          <div class="stat-icon stat-icon-total">☰</div>
+          <div>
+            <div class="stat-value" id="statTotal">0</div>
+            <div class="stat-label">Total Tugas</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon-active">○</div>
+          <div>
+            <div class="stat-value" id="statActive">0</div>
+            <div class="stat-label">Belum Selesai</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon-done">✓</div>
+          <div>
+            <div class="stat-value" id="statDone">0</div>
+            <div class="stat-label">Selesai</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon-progress">%</div>
+          <div>
+            <div class="stat-value" id="statProgress">0%</div>
+            <div class="stat-label">Progress</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="add-task-card">
+        <input type="text" id="taskInput" placeholder="Tambah tugas baru... (tekan Enter)" />
+        <select id="taskCategory">
+          <option value="kerja">Kerja</option>
+          <option value="pribadi">Pribadi</option>
+          <option value="belajar">Belajar</option>
+        </select>
+        <select id="taskPriority">
+          <option value="low">Rendah</option>
+          <option value="medium" selected>Sedang</option>
+          <option value="high">Tinggi</option>
+        </select>
+        <input type="date" id="taskDate" />
+        <button id="addTaskBtn">+ Tambah</button>
+      </section>
+
+      <section class="filter-row">
+        <div class="filter-chips" id="priorityFilters">
+          <button class="chip active" data-priority="all">Semua Prioritas</button>
+          <button class="chip" data-priority="high">🔴 Tinggi</button>
+          <button class="chip" data-priority="medium">🟡 Sedang</button>
+          <button class="chip" data-priority="low">🟢 Rendah</button>
+        </div>
+        <select id="sortSelect">
+          <option value="newest">Terbaru</option>
+          <option value="oldest">Terlama</option>
+          <option value="priority">Prioritas</option>
+          <option value="due">Tenggat Waktu</option>
+        </select>
+      </section>
+
+      <section class="task-list" id="taskList">
+        <!-- Tasks rendered here -->
+      </section>
+
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">🗒️</div>
+        <p>Belum ada tugas. Tambahkan tugas pertamamu!</p>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
