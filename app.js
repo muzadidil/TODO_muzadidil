@@ -30,6 +30,16 @@ function isToday(dateStr) {
   return dateStr === today;
 }
 
+function formatDateTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short" }) +
+    " " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+}
+
+function escapeAttr(str) {
+  return str.replace(/"/g, "&quot;");
+}
+
 const CATEGORY_LABELS = { kerja: "Kerja", pribadi: "Pribadi", belajar: "Belajar" };
 const PRIORITY_LABELS = { high: "Tinggi", medium: "Sedang", low: "Rendah" };
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
@@ -40,7 +50,9 @@ const emptyStateEl = document.getElementById("emptyState");
 const taskInput = document.getElementById("taskInput");
 const taskCategory = document.getElementById("taskCategory");
 const taskPriority = document.getElementById("taskPriority");
-const taskDate = document.getElementById("taskDate");
+const taskLinkBtn = document.getElementById("taskLinkBtn");
+const taskLinkRow = document.getElementById("taskLinkRow");
+const taskLinkInput = document.getElementById("taskLinkInput");
 const addTaskBtn = document.getElementById("addTaskBtn");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
@@ -51,6 +63,13 @@ const viewSubtitle = document.getElementById("viewSubtitle");
 addTaskBtn.addEventListener("click", addTask);
 taskInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") addTask();
+});
+
+taskLinkBtn.addEventListener("click", () => {
+  const showing = taskLinkRow.style.display !== "none";
+  taskLinkRow.style.display = showing ? "none" : "block";
+  taskLinkBtn.classList.toggle("active", !showing);
+  if (!showing) taskLinkInput.focus();
 });
 
 searchInput.addEventListener("input", (e) => {
@@ -108,18 +127,22 @@ async function addTask() {
   const text = taskInput.value.trim();
   if (!text) return;
 
+  const now = Date.now();
   await addDoc(tasksCollection, {
     text,
     category: taskCategory.value,
     priority: taskPriority.value,
-    dueDate: taskDate.value || "",
+    dueDate: new Date(now).toISOString().slice(0, 10),
+    link: taskLinkInput.value.trim(),
     completed: false,
     subtasks: [],
-    createdAt: Date.now(),
+    createdAt: now,
   });
 
   taskInput.value = "";
-  taskDate.value = "";
+  taskLinkInput.value = "";
+  taskLinkRow.style.display = "none";
+  taskLinkBtn.classList.remove("active");
 }
 
 async function toggleTask(id) {
@@ -138,10 +161,13 @@ function toggleExpand(id) {
   render();
 }
 
-async function addSubtask(taskId, text) {
+async function addSubtask(taskId, text, link) {
   const t = tasks.find((t) => t.id === taskId);
   if (!t || !text.trim()) return;
-  const subtasks = [...(t.subtasks || []), { id: uid(), text: text.trim(), completed: false }];
+  const subtasks = [
+    ...(t.subtasks || []),
+    { id: uid(), text: text.trim(), link: (link || "").trim(), completed: false },
+  ];
   await updateDoc(doc(db, "tasks", taskId), { subtasks });
 }
 
@@ -244,8 +270,9 @@ function renderTasks() {
           <span class="task-badge" style="background:transparent;padding:0;gap:5px;">
             <span class="priority-dot priority-${t.priority}"></span>${PRIORITY_LABELS[t.priority]}
           </span>
-          ${t.dueDate ? `<span class="task-date">📅 ${t.dueDate}</span>` : ""}
+          ${t.dueDate ? `<span class="task-date">📅 ${formatDateTime(t.createdAt)}</span>` : ""}
           ${subtasks.length ? `<span class="task-date">${subDone}/${subtasks.length} sub-tugas</span>` : ""}
+          ${t.link ? `<a class="link-badge" href="${escapeAttr(t.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
         </div>
       </div>
       <div class="task-actions">
@@ -267,6 +294,7 @@ function renderTasks() {
         <div class="subtask-item">
           <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${t.id}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? "✓" : ""}</button>
           <span class="subtask-text ${s.completed ? "done" : ""}"></span>
+          ${s.link ? `<a class="link-badge" href="${escapeAttr(s.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
           <button class="task-action-btn delete" data-task-id="${t.id}" data-sub-id="${s.id}" data-action="delete-sub">🗑</button>
         </div>`
         )
@@ -276,6 +304,8 @@ function renderTasks() {
         ${subList}
         <div class="subtask-add">
           <input type="text" class="subtask-input" placeholder="Tambah sub-tugas..." data-task-id="${t.id}" />
+          <button type="button" class="subtask-link-btn" data-task-id="${t.id}" title="Tambah link">🔗</button>
+          <input type="url" class="subtask-link-input" placeholder="https://..." data-task-id="${t.id}" style="display:none;" />
         </div>
       `;
 
@@ -301,12 +331,26 @@ taskListEl.addEventListener("click", (e) => {
   if (action === "delete-sub") deleteSubtask(btn.dataset.taskId, btn.dataset.subId);
 });
 
+taskListEl.addEventListener("click", (e) => {
+  const linkBtn = e.target.closest(".subtask-link-btn");
+  if (!linkBtn) return;
+  const taskId = linkBtn.dataset.taskId;
+  const linkInput = taskListEl.querySelector(`.subtask-link-input[data-task-id="${taskId}"]`);
+  const showing = linkInput.style.display !== "none";
+  linkInput.style.display = showing ? "none" : "block";
+  linkBtn.classList.toggle("active", !showing);
+  if (!showing) linkInput.focus();
+});
+
 taskListEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.classList.contains("subtask-input")) {
     const taskId = e.target.dataset.taskId;
     const text = e.target.value;
+    const linkInput = taskListEl.querySelector(`.subtask-link-input[data-task-id="${taskId}"]`);
+    const link = linkInput ? linkInput.value : "";
     e.target.value = "";
-    addSubtask(taskId, text);
+    if (linkInput) linkInput.value = "";
+    addSubtask(taskId, text, link);
   }
 });
 

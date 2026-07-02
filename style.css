@@ -298,6 +298,51 @@ body {
 
 #addTaskBtn:hover { background: var(--accent-hover); }
 
+#taskLinkBtn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  padding: 9px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+#taskLinkBtn:hover { border-color: var(--accent); color: var(--text-primary); }
+#taskLinkBtn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+
+.link-input-row { margin: -10px 0 18px; }
+
+.link-input-row input {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 9px 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.link-input-row input:focus { border-color: var(--accent); }
+
+.link-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  background: var(--violet-soft);
+  color: var(--violet);
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.link-badge:hover { opacity: 0.8; }
+
 /* Filter row */
 .filter-row {
   display: flex;
@@ -471,10 +516,17 @@ body {
 .subtask-text { flex: 1; font-size: 13px; color: var(--text-secondary); }
 .subtask-text.done { text-decoration: line-through; color: var(--text-muted); }
 
-.subtask-add { margin-top: 4px; }
+.subtask-add {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
 
 .subtask-input {
-  width: 100%;
+  flex: 1;
+  min-width: 120px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -485,6 +537,33 @@ body {
 }
 
 .subtask-input:focus { border-color: var(--accent); }
+
+.subtask-link-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  padding: 7px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.subtask-link-btn:hover { border-color: var(--accent); color: var(--text-primary); }
+.subtask-link-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+
+.subtask-link-input {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-primary);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.subtask-link-input:focus { border-color: var(--accent); }
 
 /* Empty state */
 .empty-state {

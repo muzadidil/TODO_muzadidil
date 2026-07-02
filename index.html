@@ -117,9 +117,12 @@
           <option value="medium" selected>Sedang</option>
           <option value="high">Tinggi</option>
         </select>
-        <input type="date" id="taskDate" />
+        <button type="button" id="taskLinkBtn" title="Tambah link">🔗</button>
         <button id="addTaskBtn">+ Tambah</button>
       </section>
+      <div class="link-input-row" id="taskLinkRow" style="display:none;">
+        <input type="url" id="taskLinkInput" placeholder="https://..." />
+      </div>
 
       <section class="filter-row">
         <div class="filter-chips" id="priorityFilters">
