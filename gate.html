@@ -26,11 +26,11 @@
     justify-content: center;
     padding: 20px;
   }
-  .wrap { text-align: center; width: 100%; max-width: 360px; }
+  .wrap { text-align: center; width: 100%; max-width: 480px; }
   .title {
-    font-size: 56px;
+    font-size: 224px;
     font-weight: 800;
-    letter-spacing: -1.5px;
+    letter-spacing: -6px;
     background: linear-gradient(135deg, #eef0f3, #8891a1);
     -webkit-background-clip: text;
     background-clip: text;
@@ -38,14 +38,15 @@
     line-height: 1;
   }
   .brand {
-    margin-top: 10px;
-    font-size: 13px;
+    margin-top: 6px;
+    font-size: 11px;
     font-weight: 600;
-    letter-spacing: 4px;
+    letter-spacing: 3px;
     color: var(--accent);
   }
-  form { margin-top: 44px; display: flex; flex-direction: column; gap: 12px; }
+  form { margin-top: 44px; }
   input[type="password"] {
+    width: 100%;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -58,23 +59,11 @@
     transition: border-color 0.15s;
   }
   input[type="password"]:focus { border-color: var(--accent); }
-  button {
-    background: var(--accent);
-    color: #0a0a0b;
-    border: none;
-    border-radius: 10px;
-    padding: 13px 16px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-  button:hover { background: var(--accent-hover); }
   .error {
     color: var(--danger);
     font-size: 12px;
     min-height: 16px;
-    margin-top: -2px;
+    margin-top: 10px;
   }
 </style>
 </head>
@@ -85,13 +74,12 @@
 
     <form id="gateForm">
       <input type="password" id="pwInput" placeholder="Password" autofocus autocomplete="off" />
-      <div class="error" id="errorMsg"></div>
-      <button type="submit">Masuk</button>
     </form>
+    <div class="error" id="errorMsg"></div>
   </div>
 
   <script>
-    const PASSWORD = "ZaSha";
+    const PASSWORD = "zasha";
     const SESSION_KEY = "taskflow_authed";
 
     if (sessionStorage.getItem(SESSION_KEY) === "1") {
