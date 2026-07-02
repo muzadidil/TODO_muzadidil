@@ -1,24 +1,24 @@
 :root {
-  --bg: #0d1117;
-  --bg-elevated: #12161d;
-  --bg-card: #171c25;
-  --bg-hover: #1e242e;
-  --border: #262d3a;
-  --border-soft: #1d2330;
-  --text-primary: #e6e9ef;
-  --text-secondary: #8b93a3;
-  --text-muted: #565f70;
-  --accent: #5b8cff;
-  --accent-soft: #5b8cff26;
-  --accent-hover: #7099ff;
-  --success: #3ecf8e;
-  --success-soft: #3ecf8e22;
-  --warning: #e8a23d;
-  --warning-soft: #e8a23d22;
-  --danger: #f0655f;
-  --danger-soft: #f0655f22;
-  --violet: #a78bfa;
-  --violet-soft: #a78bfa22;
+  --bg: #0a0a0b;
+  --bg-elevated: #111113;
+  --bg-card: #17171a;
+  --bg-hover: #1f1f23;
+  --border: #29292e;
+  --border-soft: #1c1c20;
+  --text-primary: #edecee;
+  --text-secondary: #8f8f97;
+  --text-muted: #55555d;
+  --accent: #a1a1aa;
+  --accent-soft: #a1a1aa1f;
+  --accent-hover: #d4d4d8;
+  --success: #7a8f7f;
+  --success-soft: #7a8f7f22;
+  --warning: #a99568;
+  --warning-soft: #a9956822;
+  --danger: #a97a7a;
+  --danger-soft: #a97a7a22;
+  --violet: #9494a3;
+  --violet-soft: #9494a322;
   --radius: 12px;
 }
 
@@ -58,7 +58,7 @@ body {
   height: 10px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--violet));
-  box-shadow: 0 0 12px rgba(91, 140, 255, 0.55);
+  box-shadow: 0 0 12px rgba(161, 161, 170, 0.4);
 }
 
 .brand-name {
@@ -285,7 +285,7 @@ body {
 
 #addTaskBtn {
   background: var(--accent);
-  color: white;
+  color: #0a0a0b;
   border: none;
   border-radius: 8px;
   padding: 9px 18px;
@@ -421,7 +421,7 @@ body {
 }
 
 .task-checkbox:hover { border-color: var(--accent); }
-.task-checkbox.checked { background: var(--success); border-color: var(--success); color: #06251a; }
+.task-checkbox.checked { background: var(--success); border-color: var(--success); color: #0a0a0b; }
 
 .task-body { flex: 1; min-width: 0; }
 
@@ -511,7 +511,7 @@ body {
 }
 
 .subtask-checkbox:hover { border-color: var(--accent); }
-.subtask-checkbox.checked { background: var(--success); border-color: var(--success); color: #06251a; }
+.subtask-checkbox.checked { background: var(--success); border-color: var(--success); color: #0a0a0b; }
 
 .subtask-text { flex: 1; font-size: 13px; color: var(--text-secondary); }
 .subtask-text.done { text-decoration: line-through; color: var(--text-muted); }
