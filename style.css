@@ -262,7 +262,7 @@ body {
   border-radius: var(--radius);
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto auto;
   gap: 10px;
   margin-bottom: 18px;
   align-items: center;
@@ -312,6 +312,20 @@ body {
 #taskLinkBtn:hover { border-color: var(--accent); color: var(--text-primary); }
 #taskLinkBtn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
 
+#taskDeadlineBtn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  padding: 9px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+#taskDeadlineBtn:hover { border-color: var(--accent); color: var(--text-primary); }
+#taskDeadlineBtn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+
 .link-input-row { margin: -10px 0 18px; }
 
 .link-input-row input {
@@ -342,6 +356,20 @@ body {
 }
 
 .link-badge:hover { opacity: 0.8; }
+
+.deadline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.deadline-normal { background: var(--bg-hover); color: var(--text-secondary); }
+.deadline-soon { background: var(--warning-soft); color: var(--warning); }
+.deadline-overdue { background: var(--danger-soft); color: var(--danger); }
 
 /* Filter row */
 .filter-row {

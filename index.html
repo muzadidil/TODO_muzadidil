@@ -33,6 +33,9 @@
         <button class="nav-item" data-filter="completed">
           <span class="nav-icon">✓</span> Selesai
         </button>
+        <button class="nav-item" data-filter="overdue">
+          <span class="nav-icon">⚠</span> Terlambat
+        </button>
       </nav>
 
       <div class="nav-section-title">Kategori</div>
@@ -118,10 +121,14 @@
           <option value="high">Tinggi</option>
         </select>
         <button type="button" id="taskLinkBtn" title="Tambah link">🔗</button>
+        <button type="button" id="taskDeadlineBtn" title="Tambah deadline">📅</button>
         <button id="addTaskBtn">+ Tambah</button>
       </section>
       <div class="link-input-row" id="taskLinkRow" style="display:none;">
         <input type="url" id="taskLinkInput" placeholder="https://..." />
+      </div>
+      <div class="link-input-row" id="taskDeadlineRow" style="display:none;">
+        <input type="date" id="taskDeadlineInput" />
       </div>
 
       <section class="filter-row">

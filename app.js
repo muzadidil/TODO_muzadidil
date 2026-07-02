@@ -36,6 +36,26 @@ function formatDateTime(ts) {
     " " + d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatDate(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function deadlineStatus(dateStr) {
+  if (!dateStr) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  if (dateStr < today) return "overdue";
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  if (dateStr === today || dateStr === tomorrowStr) return "soon";
+  return "normal";
+}
+
+function isOverdue(t) {
+  return !t.completed && deadlineStatus(t.deadline) === "overdue";
+}
+
 function escapeAttr(str) {
   return str.replace(/"/g, "&quot;");
 }
@@ -53,6 +73,9 @@ const taskPriority = document.getElementById("taskPriority");
 const taskLinkBtn = document.getElementById("taskLinkBtn");
 const taskLinkRow = document.getElementById("taskLinkRow");
 const taskLinkInput = document.getElementById("taskLinkInput");
+const taskDeadlineBtn = document.getElementById("taskDeadlineBtn");
+const taskDeadlineRow = document.getElementById("taskDeadlineRow");
+const taskDeadlineInput = document.getElementById("taskDeadlineInput");
 const addTaskBtn = document.getElementById("addTaskBtn");
 const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
@@ -70,6 +93,13 @@ taskLinkBtn.addEventListener("click", () => {
   taskLinkRow.style.display = showing ? "none" : "block";
   taskLinkBtn.classList.toggle("active", !showing);
   if (!showing) taskLinkInput.focus();
+});
+
+taskDeadlineBtn.addEventListener("click", () => {
+  const showing = taskDeadlineRow.style.display !== "none";
+  taskDeadlineRow.style.display = showing ? "none" : "block";
+  taskDeadlineBtn.classList.toggle("active", !showing);
+  if (!showing) taskDeadlineInput.focus();
 });
 
 searchInput.addEventListener("input", (e) => {
@@ -116,6 +146,7 @@ function updateViewTitle() {
     today: ["Hari Ini", "Tugas dengan tenggat waktu hari ini"],
     active: ["Belum Selesai", "Tugas yang masih perlu dikerjakan"],
     completed: ["Selesai", "Tugas yang sudah kamu selesaikan"],
+    overdue: ["Terlambat", "Tugas yang sudah lewat deadline"],
   };
   const [title, subtitle] = map[state.navFilter];
   viewTitle.textContent = title;
@@ -134,6 +165,7 @@ async function addTask() {
     priority: taskPriority.value,
     dueDate: new Date(now).toISOString().slice(0, 10),
     link: taskLinkInput.value.trim(),
+    deadline: taskDeadlineInput.value || "",
     completed: false,
     subtasks: [],
     createdAt: now,
@@ -143,6 +175,9 @@ async function addTask() {
   taskLinkInput.value = "";
   taskLinkRow.style.display = "none";
   taskLinkBtn.classList.remove("active");
+  taskDeadlineInput.value = "";
+  taskDeadlineRow.style.display = "none";
+  taskDeadlineBtn.classList.remove("active");
 }
 
 async function toggleTask(id) {
@@ -194,6 +229,7 @@ function getFilteredTasks() {
   if (state.navFilter === "today") list = list.filter((t) => isToday(t.dueDate));
   if (state.navFilter === "active") list = list.filter((t) => !t.completed);
   if (state.navFilter === "completed") list = list.filter((t) => t.completed);
+  if (state.navFilter === "overdue") list = list.filter((t) => isOverdue(t));
 
   if (state.category !== "all") list = list.filter((t) => t.category === state.category);
   if (state.priority !== "all") list = list.filter((t) => t.priority === state.priority);
@@ -210,7 +246,7 @@ function getFilteredTasks() {
       list.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]);
       break;
     case "due":
-      list.sort((a, b) => (a.dueDate || "9999").localeCompare(b.dueDate || "9999"));
+      list.sort((a, b) => (a.deadline || "9999").localeCompare(b.deadline || "9999"));
       break;
     default: // newest
       list.sort((a, b) => b.createdAt - a.createdAt);
@@ -273,6 +309,7 @@ function renderTasks() {
           ${t.dueDate ? `<span class="task-date">📅 ${formatDateTime(t.createdAt)}</span>` : ""}
           ${subtasks.length ? `<span class="task-date">${subDone}/${subtasks.length} sub-tugas</span>` : ""}
           ${t.link ? `<a class="link-badge" href="${escapeAttr(t.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
+          ${t.deadline ? `<span class="deadline-badge deadline-${deadlineStatus(t.deadline)}">⏰ ${formatDate(t.deadline)}</span>` : ""}
         </div>
       </div>
       <div class="task-actions">
