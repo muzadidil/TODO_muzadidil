@@ -26,11 +26,12 @@
     justify-content: center;
     padding: 20px;
   }
-  .wrap { text-align: center; width: 100%; max-width: 480px; }
+  .wrap { text-align: center; width: 100%; max-width: 700px; }
   .title {
-    font-size: 224px;
+    font-size: clamp(48px, 18vw, 224px);
     font-weight: 800;
-    letter-spacing: -6px;
+    letter-spacing: -0.03em;
+    white-space: nowrap;
     background: linear-gradient(135deg, #eef0f3, #8891a1);
     -webkit-background-clip: text;
     background-clip: text;
@@ -44,21 +45,23 @@
     letter-spacing: 3px;
     color: var(--accent);
   }
-  form { margin-top: 44px; }
+  form { margin-top: 56px; display: flex; justify-content: center; }
   input[type="password"] {
-    width: 100%;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    width: 160px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
     color: var(--text-primary);
-    padding: 13px 16px;
-    font-size: 15px;
+    padding: 8px 4px;
+    font-size: 14px;
     text-align: center;
-    letter-spacing: 2px;
+    letter-spacing: 3px;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color 0.2s;
   }
+  input[type="password"]::placeholder { color: transparent; }
   input[type="password"]:focus { border-color: var(--accent); }
+  input[type="password"]:focus::placeholder { color: var(--text-secondary); }
   .error {
     color: var(--danger);
     font-size: 12px;
