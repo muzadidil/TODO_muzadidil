@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ZASHA.ONLINE</title>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --bg-card: #14171e;
+    --border: #262b36;
+    --text-primary: #eef0f3;
+    --text-secondary: #8891a1;
+    --accent: #5b8cff;
+    --accent-hover: #6f9aff;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(circle at 50% 20%, #131722 0%, #0a0c10 60%);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .wrap { text-align: center; width: 100%; max-width: 360px; }
+  .title {
+    font-size: 56px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    background: linear-gradient(135deg, #eef0f3, #8891a1);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    line-height: 1;
+  }
+  .brand {
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: var(--accent);
+  }
+  form { margin-top: 44px; display: flex; flex-direction: column; gap: 12px; }
+  input[type="password"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    padding: 13px 16px;
+    font-size: 15px;
+    text-align: center;
+    letter-spacing: 2px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input[type="password"]:focus { border-color: var(--accent); }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 13px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: var(--accent-hover); }
+  .error {
+    color: var(--danger);
+    font-size: 12px;
+    min-height: 16px;
+    margin-top: -2px;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">TODO</div>
+    <div class="brand">ZASHA.ONLINE</div>
+
+    <form id="gateForm">
+      <input type="password" id="pwInput" placeholder="Password" autofocus autocomplete="off" />
+      <div class="error" id="errorMsg"></div>
+      <button type="submit">Masuk</button>
+    </form>
+  </div>
+
+  <script>
+    const PASSWORD = "ZaSha";
+    const SESSION_KEY = "taskflow_authed";
+
+    if (sessionStorage.getItem(SESSION_KEY) === "1") {
+      window.location.replace("index.html");
+    }
+
+    document.getElementById("gateForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const val = document.getElementById("pwInput").value;
+      if (val === PASSWORD) {
+        sessionStorage.setItem(SESSION_KEY, "1");
+        window.location.href = "index.html";
+      } else {
+        document.getElementById("errorMsg").textContent = "Password salah.";
+        document.getElementById("pwInput").value = "";
+        document.getElementById("pwInput").focus();
+      }
+    });
+  </script>
+</body>
+</html>

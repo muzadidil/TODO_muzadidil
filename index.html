@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>TaskFlow — TODO</title>
 <link rel="stylesheet" href="style.css" />
+<script>
+  if (sessionStorage.getItem("taskflow_authed") !== "1") {
+    window.location.replace("gate.html");
+  }
+</script>
 </head>
 <body>
   <div class="app">
@@ -12,6 +17,7 @@
       <div class="brand">
         <span class="brand-dot"></span>
         <span class="brand-name">TaskFlow</span>
+        <button class="logout-btn" id="logoutBtn" title="Keluar">⏻</button>
       </div>
 
       <nav class="nav">
@@ -141,6 +147,14 @@
     </main>
   </div>
 
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("logoutBtn")?.addEventListener("click", () => {
+        sessionStorage.removeItem("taskflow_authed");
+        window.location.replace("gate.html");
+      });
+    });
+  </script>
   <script type="module" src="firebase-config.js"></script>
   <script type="module" src="app.js"></script>
 </body>

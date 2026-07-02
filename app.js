@@ -17,7 +17,12 @@ let state = {
   priority: "all",        // all | high | medium | low
   search: "",
   sort: "newest",
+  expanded: new Set(),    // task ids with subtasks panel open
 };
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
 
 function isToday(dateStr) {
   if (!dateStr) return false;
@@ -109,6 +114,7 @@ async function addTask() {
     priority: taskPriority.value,
     dueDate: taskDate.value || "",
     completed: false,
+    subtasks: [],
     createdAt: Date.now(),
   });
 
@@ -124,6 +130,35 @@ async function toggleTask(id) {
 
 async function deleteTask(id) {
   await deleteDoc(doc(db, "tasks", id));
+}
+
+function toggleExpand(id) {
+  if (state.expanded.has(id)) state.expanded.delete(id);
+  else state.expanded.add(id);
+  render();
+}
+
+async function addSubtask(taskId, text) {
+  const t = tasks.find((t) => t.id === taskId);
+  if (!t || !text.trim()) return;
+  const subtasks = [...(t.subtasks || []), { id: uid(), text: text.trim(), completed: false }];
+  await updateDoc(doc(db, "tasks", taskId), { subtasks });
+}
+
+async function toggleSubtask(taskId, subId) {
+  const t = tasks.find((t) => t.id === taskId);
+  if (!t) return;
+  const subtasks = (t.subtasks || []).map((s) =>
+    s.id === subId ? { ...s, completed: !s.completed } : s
+  );
+  await updateDoc(doc(db, "tasks", taskId), { subtasks });
+}
+
+async function deleteSubtask(taskId, subId) {
+  const t = tasks.find((t) => t.id === taskId);
+  if (!t) return;
+  const subtasks = (t.subtasks || []).filter((s) => s.id !== subId);
+  await updateDoc(doc(db, "tasks", taskId), { subtasks });
 }
 
 // ---------- Filtering / sorting ----------
@@ -190,6 +225,13 @@ function renderTasks() {
   emptyStateEl.classList.remove("show");
 
   list.forEach((t) => {
+    const subtasks = t.subtasks || [];
+    const subDone = subtasks.filter((s) => s.completed).length;
+    const isExpanded = state.expanded.has(t.id);
+
+    const wrap = document.createElement("div");
+    wrap.className = "task-wrap";
+
     const item = document.createElement("div");
     item.className = "task-item" + (t.completed ? " completed" : "");
 
@@ -203,24 +245,69 @@ function renderTasks() {
             <span class="priority-dot priority-${t.priority}"></span>${PRIORITY_LABELS[t.priority]}
           </span>
           ${t.dueDate ? `<span class="task-date">📅 ${t.dueDate}</span>` : ""}
+          ${subtasks.length ? `<span class="task-date">${subDone}/${subtasks.length} sub-tugas</span>` : ""}
         </div>
       </div>
       <div class="task-actions">
+        <button class="task-action-btn expand ${isExpanded ? "open" : ""}" data-id="${t.id}" data-action="expand">▾</button>
         <button class="task-action-btn delete" data-id="${t.id}" data-action="delete">🗑</button>
       </div>
     `;
 
     item.querySelector(".task-text").textContent = t.text;
-    taskListEl.appendChild(item);
+    wrap.appendChild(item);
+
+    if (isExpanded) {
+      const panel = document.createElement("div");
+      panel.className = "subtask-panel";
+
+      const subList = subtasks
+        .map(
+          (s) => `
+        <div class="subtask-item">
+          <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${t.id}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? "✓" : ""}</button>
+          <span class="subtask-text ${s.completed ? "done" : ""}"></span>
+          <button class="task-action-btn delete" data-task-id="${t.id}" data-sub-id="${s.id}" data-action="delete-sub">🗑</button>
+        </div>`
+        )
+        .join("");
+
+      panel.innerHTML = `
+        ${subList}
+        <div class="subtask-add">
+          <input type="text" class="subtask-input" placeholder="Tambah sub-tugas..." data-task-id="${t.id}" />
+        </div>
+      `;
+
+      panel.querySelectorAll(".subtask-text").forEach((el, i) => {
+        el.textContent = subtasks[i].text;
+      });
+
+      wrap.appendChild(panel);
+    }
+
+    taskListEl.appendChild(wrap);
   });
 }
 
 taskListEl.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
-  const id = btn.dataset.id;
-  if (btn.dataset.action === "toggle") toggleTask(id);
-  if (btn.dataset.action === "delete") deleteTask(id);
+  const action = btn.dataset.action;
+  if (action === "toggle") toggleTask(btn.dataset.id);
+  if (action === "delete") deleteTask(btn.dataset.id);
+  if (action === "expand") toggleExpand(btn.dataset.id);
+  if (action === "toggle-sub") toggleSubtask(btn.dataset.taskId, btn.dataset.subId);
+  if (action === "delete-sub") deleteSubtask(btn.dataset.taskId, btn.dataset.subId);
+});
+
+taskListEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.classList.contains("subtask-input")) {
+    const taskId = e.target.dataset.taskId;
+    const text = e.target.value;
+    e.target.value = "";
+    addSubtask(taskId, text);
+  }
 });
 
 // ---------- Init ----------
