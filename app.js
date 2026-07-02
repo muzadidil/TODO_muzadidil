@@ -1,6 +1,16 @@
-const STORAGE_KEY = "taskflow_tasks";
+import { db } from "./firebase-config.js";
+import {
+  collection,
+  addDoc,
+  doc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
-let tasks = loadTasks();
+const tasksCollection = collection(db, "tasks");
+
+let tasks = [];
 let state = {
   navFilter: "all",       // all | today | active | completed
   category: "all",        // all | kerja | pribadi | belajar
@@ -8,23 +18,6 @@ let state = {
   search: "",
   sort: "newest",
 };
-
-function loadTasks() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveTasks() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-}
-
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
 
 function isToday(dateStr) {
   if (!dateStr) return false;
@@ -106,12 +99,11 @@ function updateViewTitle() {
 }
 
 // ---------- Core actions ----------
-function addTask() {
+async function addTask() {
   const text = taskInput.value.trim();
   if (!text) return;
 
-  tasks.unshift({
-    id: uid(),
+  await addDoc(tasksCollection, {
     text,
     category: taskCategory.value,
     priority: taskPriority.value,
@@ -122,21 +114,16 @@ function addTask() {
 
   taskInput.value = "";
   taskDate.value = "";
-  saveTasks();
-  render();
 }
 
-function toggleTask(id) {
+async function toggleTask(id) {
   const t = tasks.find((t) => t.id === id);
-  if (t) t.completed = !t.completed;
-  saveTasks();
-  render();
+  if (!t) return;
+  await updateDoc(doc(db, "tasks", id), { completed: !t.completed });
 }
 
-function deleteTask(id) {
-  tasks = tasks.filter((t) => t.id !== id);
-  saveTasks();
-  render();
+async function deleteTask(id) {
+  await deleteDoc(doc(db, "tasks", id));
 }
 
 // ---------- Filtering / sorting ----------
@@ -237,4 +224,7 @@ taskListEl.addEventListener("click", (e) => {
 });
 
 // ---------- Init ----------
-render();
+onSnapshot(tasksCollection, (snapshot) => {
+  tasks = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+  render();
+});
