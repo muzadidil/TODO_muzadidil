@@ -158,6 +158,13 @@ const addProjectBtn = document.getElementById("addProjectBtn");
 const projectAddRow = document.getElementById("projectAddRow");
 const projectNameInput = document.getElementById("projectNameInput");
 const exportPdfBtn = document.getElementById("exportPdfBtn");
+const exportModalOverlay = document.getElementById("exportModalOverlay");
+const exportModalClose = document.getElementById("exportModalClose");
+const exportAllOption = document.getElementById("exportAllOption");
+const exportOneOption = document.getElementById("exportOneOption");
+const exportProjectPicker = document.getElementById("exportProjectPicker");
+const exportProjectSelect = document.getElementById("exportProjectSelect");
+const exportProjectConfirmBtn = document.getElementById("exportProjectConfirmBtn");
 
 // ---------- Event bindings ----------
 addTaskBtn.addEventListener("click", addTask);
@@ -216,7 +223,48 @@ document.querySelectorAll(".chip").forEach((btn) => {
   });
 });
 
-exportPdfBtn.addEventListener("click", exportPdf);
+exportPdfBtn.addEventListener("click", openExportModal);
+
+function openExportModal() {
+  exportProjectSelect.innerHTML = projects
+    .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`)
+    .join("");
+  const noProjCount = tasks.filter((t) => !t.projectId).length;
+  if (noProjCount) {
+    exportProjectSelect.innerHTML += `<option value="">Tanpa Proyek</option>`;
+  }
+  exportProjectPicker.style.display = "none";
+  exportModalOverlay.classList.add("show");
+}
+
+function closeExportModal() {
+  exportModalOverlay.classList.remove("show");
+  exportProjectPicker.style.display = "none";
+}
+
+exportModalClose.addEventListener("click", closeExportModal);
+exportModalOverlay.addEventListener("click", (e) => {
+  if (e.target === exportModalOverlay) closeExportModal();
+});
+
+exportAllOption.addEventListener("click", () => {
+  closeExportModal();
+  exportPdf("all");
+});
+
+exportOneOption.addEventListener("click", () => {
+  if (!projects.length) {
+    alert("Belum ada proyek untuk diexport. Buat proyek terlebih dahulu.");
+    return;
+  }
+  exportProjectPicker.style.display = "flex";
+});
+
+exportProjectConfirmBtn.addEventListener("click", () => {
+  const target = exportProjectSelect.value;
+  closeExportModal();
+  exportPdf(target);
+});
 
 // ---------- Projects ----------
 addProjectBtn.addEventListener("click", () => {
@@ -720,7 +768,7 @@ function pdfStatBox(pdf, x, y, w, label, value, color) {
   pdf.text(label, x + 5, y + 14.5);
 }
 
-function exportPdf() {
+function exportPdf(target) {
   if (!window.jspdf || !window.jspdf.jsPDF) {
     alert("Library PDF belum termuat. Periksa koneksi internet lalu coba lagi.");
     return;
@@ -728,10 +776,10 @@ function exportPdf() {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF({ unit: "mm", format: "a4" });
 
-  const isAll = state.project === "all";
-  const proj = projects.find((p) => p.id === state.project);
+  const isAll = target === "all";
+  const proj = projects.find((p) => p.id === target);
   const projName = isAll ? "Semua Proyek" : proj ? proj.name : "Tanpa Proyek";
-  const scoped = projectScopedTasks();
+  const scoped = isAll ? tasks : tasks.filter((t) => (t.projectId || "") === target);
   const todayLabel = new Date().toLocaleDateString("id-ID", {
     day: "numeric", month: "long", year: "numeric",
   });
