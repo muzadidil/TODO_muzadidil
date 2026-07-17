@@ -38,6 +38,17 @@
         </button>
       </nav>
 
+      <div class="nav-section-title section-with-action">
+        <span>Proyek</span>
+        <button class="icon-btn" id="addProjectBtn" title="Tambah proyek">+</button>
+      </div>
+      <div class="project-add-row" id="projectAddRow" style="display:none;">
+        <input type="text" id="projectNameInput" placeholder="Nama proyek... (Enter)" />
+      </div>
+      <nav class="nav projects" id="projectList">
+        <!-- Projects rendered here -->
+      </nav>
+
       <div class="nav-section-title">Kategori</div>
       <nav class="nav categories" id="categoryList">
         <button class="nav-item cat-item active" data-category="all">
@@ -56,7 +67,7 @@
 
       <div class="sidebar-footer">
         <div class="progress-card">
-          <div class="progress-card-label">Progress Hari Ini</div>
+          <div class="progress-card-label" id="sidebarProgressLabel">Progress Keseluruhan</div>
           <div class="progress-bar-track">
             <div class="progress-bar-fill" id="sidebarProgressFill"></div>
           </div>
@@ -71,9 +82,12 @@
           <h1 id="viewTitle">Semua Tugas</h1>
           <p id="viewSubtitle">Kelola semua tugasmu di satu tempat</p>
         </div>
-        <div class="search-box">
-          <span class="search-icon">⌕</span>
-          <input type="text" id="searchInput" placeholder="Cari tugas..." />
+        <div class="topbar-actions">
+          <button id="exportPdfBtn" class="export-btn" title="Export laporan progres PDF">📄 Export PDF</button>
+          <div class="search-box">
+            <span class="search-icon">⌕</span>
+            <input type="text" id="searchInput" placeholder="Cari tugas..." />
+          </div>
         </div>
       </header>
 
@@ -110,6 +124,9 @@
 
       <section class="add-task-card">
         <input type="text" id="taskInput" placeholder="Tambah tugas baru... (tekan Enter)" />
+        <select id="taskProject" title="Proyek">
+          <option value="">Tanpa Proyek</option>
+        </select>
         <select id="taskCategory">
           <option value="kerja">Kerja</option>
           <option value="pribadi">Pribadi</option>
@@ -165,6 +182,8 @@
       });
     });
   </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <script type="module" src="firebase-config.js"></script>
   <script type="module" src="app.js"></script>
 </body>

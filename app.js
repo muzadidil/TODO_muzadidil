@@ -9,15 +9,19 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 const tasksCollection = collection(db, "tasks");
+const projectsCollection = collection(db, "projects");
 
 let tasks = [];
+let projects = [];
 let state = {
-  navFilter: "all",       // all | today | active | completed
+  project: "all",         // all | <projectId> | "" (tanpa proyek)
+  navFilter: "all",       // all | today | active | completed | overdue
   category: "all",        // all | kerja | pribadi | belajar
   priority: "all",        // all | high | medium | low
   search: "",
   sort: "newest",
   expanded: new Set(),    // task ids with subtasks panel open
+  subAddOpen: new Set(),  // "taskId:subId" with nested add-row open
 };
 
 function uid() {
@@ -57,17 +61,85 @@ function isOverdue(t) {
 }
 
 function escapeAttr(str) {
-  return str.replace(/"/g, "&quot;");
+  return String(str).replace(/"/g, "&quot;");
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 const CATEGORY_LABELS = { kerja: "Kerja", pribadi: "Pribadi", belajar: "Belajar" };
 const PRIORITY_LABELS = { high: "Tinggi", medium: "Sedang", low: "Rendah" };
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
+const PROJECT_COLORS = ["#8da2fb", "#5fd39a", "#f0c04c", "#f08484", "#b8a7f0", "#64b5f6", "#4dd0e1", "#ffb74d"];
+
+function projColor(i) {
+  return PROJECT_COLORS[i % PROJECT_COLORS.length];
+}
+
+// ---------- Subtask tree helpers (recursive, unlimited depth) ----------
+function addNodeToTree(nodes, parentId, node) {
+  if (!parentId) return [...nodes, node];
+  return nodes.map((n) =>
+    n.id === parentId
+      ? { ...n, children: [...(n.children || []), node] }
+      : { ...n, children: addNodeToTree(n.children || [], parentId, node) }
+  );
+}
+
+function toggleNodeInTree(nodes, subId) {
+  return nodes.map((n) =>
+    n.id === subId
+      ? { ...n, completed: !n.completed }
+      : { ...n, children: toggleNodeInTree(n.children || [], subId) }
+  );
+}
+
+function removeNodeFromTree(nodes, subId) {
+  return nodes
+    .filter((n) => n.id !== subId)
+    .map((n) => ({ ...n, children: removeNodeFromTree(n.children || [], subId) }));
+}
+
+function countTree(nodes) {
+  let total = 0, done = 0;
+  for (const n of nodes || []) {
+    total++;
+    if (n.completed) done++;
+    const c = countTree(n.children || []);
+    total += c.total;
+    done += c.done;
+  }
+  return { total, done };
+}
+
+// ---------- Progress ----------
+function taskProgress(t) {
+  if (t.completed) return 100;
+  const { total, done } = countTree(t.subtasks || []);
+  if (total === 0) return 0;
+  return Math.round((done / total) * 100);
+}
+
+function meanProgress(list) {
+  if (!list.length) return 0;
+  return Math.round(list.reduce((sum, t) => sum + taskProgress(t), 0) / list.length);
+}
+
+function projectScopedTasks() {
+  if (state.project === "all") return tasks;
+  return tasks.filter((t) => (t.projectId || "") === state.project);
+}
 
 // ---------- DOM refs ----------
 const taskListEl = document.getElementById("taskList");
 const emptyStateEl = document.getElementById("emptyState");
 const taskInput = document.getElementById("taskInput");
+const taskProject = document.getElementById("taskProject");
 const taskCategory = document.getElementById("taskCategory");
 const taskPriority = document.getElementById("taskPriority");
 const taskLinkBtn = document.getElementById("taskLinkBtn");
@@ -81,6 +153,11 @@ const searchInput = document.getElementById("searchInput");
 const sortSelect = document.getElementById("sortSelect");
 const viewTitle = document.getElementById("viewTitle");
 const viewSubtitle = document.getElementById("viewSubtitle");
+const projectListEl = document.getElementById("projectList");
+const addProjectBtn = document.getElementById("addProjectBtn");
+const projectAddRow = document.getElementById("projectAddRow");
+const projectNameInput = document.getElementById("projectNameInput");
+const exportPdfBtn = document.getElementById("exportPdfBtn");
 
 // ---------- Event bindings ----------
 addTaskBtn.addEventListener("click", addTask);
@@ -117,7 +194,6 @@ document.querySelectorAll(".nav-item[data-filter]").forEach((btn) => {
     document.querySelectorAll(".nav-item[data-filter]").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     state.navFilter = btn.dataset.filter;
-    updateViewTitle();
     render();
   });
 });
@@ -140,6 +216,107 @@ document.querySelectorAll(".chip").forEach((btn) => {
   });
 });
 
+exportPdfBtn.addEventListener("click", exportPdf);
+
+// ---------- Projects ----------
+addProjectBtn.addEventListener("click", () => {
+  const showing = projectAddRow.style.display !== "none";
+  projectAddRow.style.display = showing ? "none" : "block";
+  if (!showing) projectNameInput.focus();
+});
+
+projectNameInput.addEventListener("keydown", async (e) => {
+  if (e.key === "Escape") {
+    projectAddRow.style.display = "none";
+    projectNameInput.value = "";
+    return;
+  }
+  if (e.key !== "Enter") return;
+  const name = projectNameInput.value.trim();
+  if (!name) return;
+  projectNameInput.value = "";
+  projectAddRow.style.display = "none";
+  const ref = await addDoc(projectsCollection, { name, createdAt: Date.now() });
+  state.project = ref.id;
+  render();
+});
+
+projectListEl.addEventListener("click", (e) => {
+  const del = e.target.closest("[data-del-project]");
+  if (del) {
+    e.stopPropagation();
+    deleteProject(del.dataset.delProject);
+    return;
+  }
+  const btn = e.target.closest("[data-project]");
+  if (!btn) return;
+  state.project = btn.getAttribute("data-project");
+  if (state.project !== "all") taskProject.value = state.project;
+  render();
+});
+
+async function deleteProject(id) {
+  const p = projects.find((p) => p.id === id);
+  if (!p) return;
+  const projTasks = tasks.filter((t) => t.projectId === id);
+  const suffix = projTasks.length ? ` beserta ${projTasks.length} tugasnya` : "";
+  if (!confirm(`Hapus proyek "${p.name}"${suffix}?`)) return;
+  for (const t of projTasks) {
+    await deleteDoc(doc(db, "tasks", t.id));
+  }
+  await deleteDoc(doc(db, "projects", id));
+  if (state.project === id) state.project = "all";
+}
+
+function renderProjects() {
+  const counts = {};
+  tasks.forEach((t) => {
+    const pid = t.projectId || "";
+    counts[pid] = (counts[pid] || 0) + 1;
+  });
+
+  let html = `
+    <button class="nav-item proj-item ${state.project === "all" ? "active" : ""}" data-project="all">
+      <span class="nav-icon">▤</span>
+      <span class="proj-name">Semua Proyek</span>
+      <span class="proj-count">${tasks.length}</span>
+    </button>`;
+
+  projects.forEach((p, i) => {
+    const scoped = tasks.filter((t) => t.projectId === p.id);
+    const pct = meanProgress(scoped);
+    html += `
+    <button class="nav-item proj-item ${state.project === p.id ? "active" : ""}" data-project="${p.id}">
+      <span class="cat-dot" style="background:${projColor(i)}"></span>
+      <span class="proj-name" title="${escapeAttr(p.name)}">${escapeHtml(p.name)}</span>
+      <span class="proj-pct">${pct}%</span>
+      <span class="proj-del" data-del-project="${p.id}" title="Hapus proyek">🗑</span>
+    </button>`;
+  });
+
+  if (counts[""]) {
+    html += `
+    <button class="nav-item proj-item ${state.project === "" ? "active" : ""}" data-project="">
+      <span class="cat-dot" style="background:#6b7280"></span>
+      <span class="proj-name">Tanpa Proyek</span>
+      <span class="proj-count">${counts[""]}</span>
+    </button>`;
+  }
+
+  projectListEl.innerHTML = html;
+}
+
+function populateTaskProjectSelect() {
+  const current = taskProject.value;
+  taskProject.innerHTML =
+    `<option value="">Tanpa Proyek</option>` +
+    projects.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
+  if ([...taskProject.options].some((o) => o.value === current)) taskProject.value = current;
+  if (state.project !== "all" && projects.some((p) => p.id === state.project)) {
+    taskProject.value = state.project;
+  }
+}
+
 function updateViewTitle() {
   const map = {
     all: ["Semua Tugas", "Kelola semua tugasmu di satu tempat"],
@@ -148,7 +325,16 @@ function updateViewTitle() {
     completed: ["Selesai", "Tugas yang sudah kamu selesaikan"],
     overdue: ["Terlambat", "Tugas yang sudah lewat deadline"],
   };
-  const [title, subtitle] = map[state.navFilter];
+  let [title, subtitle] = map[state.navFilter];
+
+  if (state.project !== "all") {
+    const p = projects.find((p) => p.id === state.project);
+    const pname = p ? p.name : "Tanpa Proyek";
+    title = state.navFilter === "all" ? pname : `${pname} — ${map[state.navFilter][0]}`;
+    const scoped = projectScopedTasks();
+    subtitle = `Proyek • ${scoped.length} tugas • ${meanProgress(scoped)}% progres`;
+  }
+
   viewTitle.textContent = title;
   viewSubtitle.textContent = subtitle;
 }
@@ -161,6 +347,7 @@ async function addTask() {
   const now = Date.now();
   await addDoc(tasksCollection, {
     text,
+    projectId: taskProject.value,
     category: taskCategory.value,
     priority: taskPriority.value,
     dueDate: new Date(now).toISOString().slice(0, 10),
@@ -196,35 +383,31 @@ function toggleExpand(id) {
   render();
 }
 
-async function addSubtask(taskId, text, link) {
+async function addSubtask(taskId, parentId, text, link) {
   const t = tasks.find((t) => t.id === taskId);
   if (!t || !text.trim()) return;
-  const subtasks = [
-    ...(t.subtasks || []),
-    { id: uid(), text: text.trim(), link: (link || "").trim(), completed: false },
-  ];
+  const node = { id: uid(), text: text.trim(), link: (link || "").trim(), completed: false, children: [] };
+  const subtasks = addNodeToTree(t.subtasks || [], parentId, node);
   await updateDoc(doc(db, "tasks", taskId), { subtasks });
 }
 
 async function toggleSubtask(taskId, subId) {
   const t = tasks.find((t) => t.id === taskId);
   if (!t) return;
-  const subtasks = (t.subtasks || []).map((s) =>
-    s.id === subId ? { ...s, completed: !s.completed } : s
-  );
+  const subtasks = toggleNodeInTree(t.subtasks || [], subId);
   await updateDoc(doc(db, "tasks", taskId), { subtasks });
 }
 
 async function deleteSubtask(taskId, subId) {
   const t = tasks.find((t) => t.id === taskId);
   if (!t) return;
-  const subtasks = (t.subtasks || []).filter((s) => s.id !== subId);
+  const subtasks = removeNodeFromTree(t.subtasks || [], subId);
   await updateDoc(doc(db, "tasks", taskId), { subtasks });
 }
 
 // ---------- Filtering / sorting ----------
 function getFilteredTasks() {
-  let list = [...tasks];
+  let list = projectScopedTasks().slice();
 
   if (state.navFilter === "today") list = list.filter((t) => isToday(t.dueDate));
   if (state.navFilter === "active") list = list.filter((t) => !t.completed);
@@ -257,15 +440,19 @@ function getFilteredTasks() {
 
 // ---------- Rendering ----------
 function render() {
+  renderProjects();
+  populateTaskProjectSelect();
+  updateViewTitle();
   renderStats();
   renderTasks();
 }
 
 function renderStats() {
-  const total = tasks.length;
-  const done = tasks.filter((t) => t.completed).length;
+  const scoped = projectScopedTasks();
+  const total = scoped.length;
+  const done = scoped.filter((t) => t.completed).length;
   const active = total - done;
-  const progress = total ? Math.round((done / total) * 100) : 0;
+  const progress = meanProgress(scoped);
 
   document.getElementById("statTotal").textContent = total;
   document.getElementById("statActive").textContent = active;
@@ -274,6 +461,35 @@ function renderStats() {
 
   document.getElementById("sidebarProgressFill").style.width = progress + "%";
   document.getElementById("sidebarProgressText").textContent = progress + "% selesai";
+}
+
+function renderSubtree(taskId, nodes, depth) {
+  let html = "";
+  (nodes || []).forEach((s) => {
+    const addKey = taskId + ":" + s.id;
+    html += `
+      <div class="subtask-item" style="margin-left:${depth * 22}px">
+        <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? "✓" : ""}</button>
+        <span class="subtask-text ${s.completed ? "done" : ""}">${escapeHtml(s.text)}</span>
+        ${s.link ? `<a class="link-badge" href="${escapeAttr(s.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
+        <button class="task-action-btn addsub ${state.subAddOpen.has(addKey) ? "open" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="add-sub-toggle" title="Tambah sub-tugas di dalamnya">+</button>
+        <button class="task-action-btn delete" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="delete-sub">🗑</button>
+      </div>`;
+    if (state.subAddOpen.has(addKey)) {
+      html += renderSubAddRow(taskId, s.id, depth + 1);
+    }
+    html += renderSubtree(taskId, s.children, depth + 1);
+  });
+  return html;
+}
+
+function renderSubAddRow(taskId, parentId, depth) {
+  return `
+    <div class="subtask-add" style="margin-left:${depth * 22}px">
+      <input type="text" class="subtask-input" placeholder="Tambah sub-tugas..." data-task-id="${taskId}" data-parent-id="${parentId}" />
+      <button type="button" class="subtask-link-btn" data-task-id="${taskId}" data-parent-id="${parentId}" title="Tambah link">🔗</button>
+      <input type="url" class="subtask-link-input" placeholder="https://..." data-task-id="${taskId}" data-parent-id="${parentId}" style="display:none;" />
+    </div>`;
 }
 
 function renderTasks() {
@@ -288,8 +504,10 @@ function renderTasks() {
 
   list.forEach((t) => {
     const subtasks = t.subtasks || [];
-    const subDone = subtasks.filter((s) => s.completed).length;
+    const { total: subTotal, done: subDone } = countTree(subtasks);
     const isExpanded = state.expanded.has(t.id);
+    const pct = taskProgress(t);
+    const proj = projects.find((p) => p.id === t.projectId);
 
     const wrap = document.createElement("div");
     wrap.className = "task-wrap";
@@ -302,14 +520,19 @@ function renderTasks() {
       <div class="task-body">
         <div class="task-text"></div>
         <div class="task-meta">
+          ${proj && state.project === "all" ? `<span class="task-badge badge-project">📁 ${escapeHtml(proj.name)}</span>` : ""}
           <span class="task-badge badge-${t.category}">${CATEGORY_LABELS[t.category]}</span>
           <span class="task-badge" style="background:transparent;padding:0;gap:5px;">
             <span class="priority-dot priority-${t.priority}"></span>${PRIORITY_LABELS[t.priority]}
           </span>
           ${t.dueDate ? `<span class="task-date">📅 ${formatDateTime(t.createdAt)}</span>` : ""}
-          ${subtasks.length ? `<span class="task-date">${subDone}/${subtasks.length} sub-tugas</span>` : ""}
+          ${subTotal ? `<span class="task-date">${subDone}/${subTotal} sub-tugas</span>` : ""}
           ${t.link ? `<a class="link-badge" href="${escapeAttr(t.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
           ${t.deadline ? `<span class="deadline-badge deadline-${deadlineStatus(t.deadline)}">⏰ ${formatDate(t.deadline)}</span>` : ""}
+        </div>
+        <div class="task-progress">
+          <div class="task-progress-track"><div class="task-progress-fill ${pct === 100 ? "full" : ""}" style="width:${pct}%"></div></div>
+          <span class="task-progress-pct">${pct}%</span>
         </div>
       </div>
       <div class="task-actions">
@@ -324,32 +547,7 @@ function renderTasks() {
     if (isExpanded) {
       const panel = document.createElement("div");
       panel.className = "subtask-panel";
-
-      const subList = subtasks
-        .map(
-          (s) => `
-        <div class="subtask-item">
-          <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${t.id}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? "✓" : ""}</button>
-          <span class="subtask-text ${s.completed ? "done" : ""}"></span>
-          ${s.link ? `<a class="link-badge" href="${escapeAttr(s.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
-          <button class="task-action-btn delete" data-task-id="${t.id}" data-sub-id="${s.id}" data-action="delete-sub">🗑</button>
-        </div>`
-        )
-        .join("");
-
-      panel.innerHTML = `
-        ${subList}
-        <div class="subtask-add">
-          <input type="text" class="subtask-input" placeholder="Tambah sub-tugas..." data-task-id="${t.id}" />
-          <button type="button" class="subtask-link-btn" data-task-id="${t.id}" title="Tambah link">🔗</button>
-          <input type="url" class="subtask-link-input" placeholder="https://..." data-task-id="${t.id}" style="display:none;" />
-        </div>
-      `;
-
-      panel.querySelectorAll(".subtask-text").forEach((el, i) => {
-        el.textContent = subtasks[i].text;
-      });
-
+      panel.innerHTML = renderSubtree(t.id, subtasks, 0) + renderSubAddRow(t.id, "", 0);
       wrap.appendChild(panel);
     }
 
@@ -366,13 +564,27 @@ taskListEl.addEventListener("click", (e) => {
   if (action === "expand") toggleExpand(btn.dataset.id);
   if (action === "toggle-sub") toggleSubtask(btn.dataset.taskId, btn.dataset.subId);
   if (action === "delete-sub") deleteSubtask(btn.dataset.taskId, btn.dataset.subId);
+  if (action === "add-sub-toggle") {
+    const key = btn.dataset.taskId + ":" + btn.dataset.subId;
+    if (state.subAddOpen.has(key)) state.subAddOpen.delete(key);
+    else state.subAddOpen.add(key);
+    render();
+    const input = taskListEl.querySelector(
+      `.subtask-input[data-task-id="${btn.dataset.taskId}"][data-parent-id="${btn.dataset.subId}"]`
+    );
+    if (input) input.focus();
+  }
 });
 
 taskListEl.addEventListener("click", (e) => {
   const linkBtn = e.target.closest(".subtask-link-btn");
   if (!linkBtn) return;
   const taskId = linkBtn.dataset.taskId;
-  const linkInput = taskListEl.querySelector(`.subtask-link-input[data-task-id="${taskId}"]`);
+  const parentId = linkBtn.dataset.parentId || "";
+  const linkInput = taskListEl.querySelector(
+    `.subtask-link-input[data-task-id="${taskId}"][data-parent-id="${parentId}"]`
+  );
+  if (!linkInput) return;
   const showing = linkInput.style.display !== "none";
   linkInput.style.display = showing ? "none" : "block";
   linkBtn.classList.toggle("active", !showing);
@@ -382,16 +594,259 @@ taskListEl.addEventListener("click", (e) => {
 taskListEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.classList.contains("subtask-input")) {
     const taskId = e.target.dataset.taskId;
+    const parentId = e.target.dataset.parentId || "";
     const text = e.target.value;
-    const linkInput = taskListEl.querySelector(`.subtask-link-input[data-task-id="${taskId}"]`);
+    const linkInput = taskListEl.querySelector(
+      `.subtask-link-input[data-task-id="${taskId}"][data-parent-id="${parentId}"]`
+    );
     const link = linkInput ? linkInput.value : "";
     e.target.value = "";
     if (linkInput) linkInput.value = "";
-    addSubtask(taskId, text, link);
+    addSubtask(taskId, parentId, text, link);
   }
 });
 
+// ---------- PDF Export ----------
+function pdfSafe(str) {
+  const clean = String(str || "").replace(/[^\x20-\x7E\xA0-\xFF]/g, "").replace(/\s+/g, " ").trim();
+  return clean || "-";
+}
+
+const PDF_NAVY = [43, 52, 80];
+const PDF_ACCENT = [79, 101, 197];
+const PDF_GRAY_BG = [243, 245, 249];
+const PDF_GREEN = [34, 139, 84];
+const PDF_AMBER = [190, 130, 10];
+const PDF_RED = [178, 76, 76];
+
+function taskStatusLabel(t) {
+  const pct = taskProgress(t);
+  if (t.completed || pct === 100) return "Selesai";
+  if (pct > 0) return "Proses";
+  return "Belum";
+}
+
+function flattenSubtasksForPdf(nodes, depth, rows, meta) {
+  (nodes || []).forEach((s) => {
+    rows.push([
+      "",
+      "    ".repeat(depth) + "- " + pdfSafe(s.text),
+      "",
+      "",
+      "",
+      s.completed ? "Selesai" : "Belum",
+      "",
+    ]);
+    meta.push("sub");
+    flattenSubtasksForPdf(s.children, depth + 1, rows, meta);
+  });
+}
+
+function pdfTaskTable(pdf, list, startY) {
+  const rows = [];
+  const meta = [];
+  list.forEach((t, i) => {
+    const pct = taskProgress(t);
+    rows.push([
+      String(i + 1),
+      pdfSafe(t.text),
+      CATEGORY_LABELS[t.category] || "-",
+      PRIORITY_LABELS[t.priority] || "-",
+      t.deadline ? formatDate(t.deadline) : "-",
+      taskStatusLabel(t),
+      pct + "%",
+    ]);
+    meta.push("task");
+    flattenSubtasksForPdf(t.subtasks, 0, rows, meta);
+  });
+
+  pdf.autoTable({
+    startY,
+    head: [["No", "Tugas", "Kategori", "Prioritas", "Deadline", "Status", "Progres"]],
+    body: rows,
+    margin: { left: 14, right: 14, top: 20, bottom: 18 },
+    styles: { font: "helvetica", fontSize: 8.5, cellPadding: 2.2, textColor: [45, 50, 60] },
+    headStyles: { fillColor: PDF_NAVY, textColor: 255, fontStyle: "bold", fontSize: 8.5 },
+    alternateRowStyles: { fillColor: [248, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 9, halign: "center" },
+      1: { cellWidth: "auto" },
+      2: { cellWidth: 20 },
+      3: { cellWidth: 19 },
+      4: { cellWidth: 25 },
+      5: { cellWidth: 18 },
+      6: { cellWidth: 17, halign: "right" },
+    },
+    didParseCell(d) {
+      if (d.section !== "body") return;
+      const m = meta[d.row.index];
+      if (m === "task") {
+        if (d.column.index === 1 || d.column.index === 6) d.cell.styles.fontStyle = "bold";
+      } else {
+        d.cell.styles.textColor = [115, 121, 133];
+        d.cell.styles.fontSize = 8;
+      }
+      if (d.column.index === 5 && d.cell.raw) {
+        if (d.cell.raw === "Selesai") d.cell.styles.textColor = PDF_GREEN;
+        else if (d.cell.raw === "Proses") d.cell.styles.textColor = PDF_AMBER;
+        else if (d.cell.raw === "Belum") d.cell.styles.textColor = PDF_RED;
+        d.cell.styles.fontStyle = "bold";
+      }
+    },
+  });
+  return pdf.lastAutoTable.finalY;
+}
+
+function pdfProgressBar(pdf, x, y, w, pct, color) {
+  pdf.setFillColor(228, 231, 238);
+  pdf.roundedRect(x, y, w, 5, 2.5, 2.5, "F");
+  if (pct > 0) {
+    const fw = Math.max((w * pct) / 100, 5);
+    pdf.setFillColor(...color);
+    pdf.roundedRect(x, y, fw, 5, 2.5, 2.5, "F");
+  }
+}
+
+function pdfStatBox(pdf, x, y, w, label, value, color) {
+  pdf.setFillColor(...PDF_GRAY_BG);
+  pdf.roundedRect(x, y, w, 18, 2, 2, "F");
+  pdf.setTextColor(...color);
+  pdf.setFontSize(14);
+  pdf.setFont("helvetica", "bold");
+  pdf.text(String(value), x + 5, y + 9);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(115, 121, 133);
+  pdf.text(label, x + 5, y + 14.5);
+}
+
+function exportPdf() {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert("Library PDF belum termuat. Periksa koneksi internet lalu coba lagi.");
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: "mm", format: "a4" });
+
+  const isAll = state.project === "all";
+  const proj = projects.find((p) => p.id === state.project);
+  const projName = isAll ? "Semua Proyek" : proj ? proj.name : "Tanpa Proyek";
+  const scoped = projectScopedTasks();
+  const todayLabel = new Date().toLocaleDateString("id-ID", {
+    day: "numeric", month: "long", year: "numeric",
+  });
+
+  // Header band
+  pdf.setFillColor(...PDF_NAVY);
+  pdf.rect(0, 0, 210, 36, "F");
+  pdf.setTextColor(180, 190, 215);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(9);
+  pdf.text("LAPORAN PROGRES PROYEK", 14, 13);
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFontSize(19);
+  pdf.text(pdfSafe(projName), 14, 24);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(9);
+  pdf.setTextColor(200, 208, 228);
+  pdf.text(todayLabel, 196, 13, { align: "right" });
+  pdf.text("TaskFlow", 196, 24, { align: "right" });
+
+  let y = 46;
+
+  // Overall progress
+  const overallPct = meanProgress(scoped);
+  pdf.setTextColor(60, 66, 80);
+  pdf.setFontSize(10);
+  pdf.setFont("helvetica", "bold");
+  pdf.text("Progres Keseluruhan", 14, y);
+  pdf.setFontSize(16);
+  pdf.setTextColor(...PDF_ACCENT);
+  pdf.text(overallPct + "%", 196, y + 1, { align: "right" });
+  y += 4;
+  pdfProgressBar(pdf, 14, y, 182, overallPct, PDF_ACCENT);
+  y += 13;
+
+  // Stat boxes
+  const total = scoped.length;
+  const selesai = scoped.filter((t) => taskStatusLabel(t) === "Selesai").length;
+  const proses = scoped.filter((t) => taskStatusLabel(t) === "Proses").length;
+  const belum = total - selesai - proses;
+  const boxW = 42.5;
+  pdfStatBox(pdf, 14, y, boxW, "Total Tugas", total, [45, 50, 60]);
+  pdfStatBox(pdf, 14 + boxW + 4, y, boxW, "Selesai", selesai, PDF_GREEN);
+  pdfStatBox(pdf, 14 + (boxW + 4) * 2, y, boxW, "Dalam Proses", proses, PDF_AMBER);
+  pdfStatBox(pdf, 14 + (boxW + 4) * 3, y, boxW, "Belum Mulai", belum, PDF_RED);
+  y += 28;
+
+  // Task tables
+  if (scoped.length === 0) {
+    pdf.setFontSize(10);
+    pdf.setFont("helvetica", "normal");
+    pdf.setTextColor(115, 121, 133);
+    pdf.text("Belum ada tugas pada proyek ini.", 14, y);
+  } else if (isAll) {
+    // Group per project (+ tasks without project)
+    const groups = projects.map((p) => ({
+      name: p.name,
+      list: tasks.filter((t) => t.projectId === p.id),
+    }));
+    const noProj = tasks.filter((t) => !projects.some((p) => p.id === t.projectId));
+    if (noProj.length) groups.push({ name: "Tanpa Proyek", list: noProj });
+
+    groups.forEach((g) => {
+      if (!g.list.length) return;
+      if (y > 240) {
+        pdf.addPage();
+        y = 22;
+      }
+      const gPct = meanProgress(g.list);
+      pdf.setFillColor(...PDF_ACCENT);
+      pdf.rect(14, y - 3.5, 1.6, 5, "F");
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(11.5);
+      pdf.setTextColor(45, 50, 60);
+      pdf.text(pdfSafe(g.name), 18, y);
+      pdf.setFontSize(9);
+      pdf.setTextColor(...PDF_ACCENT);
+      pdf.text(`${gPct}%`, 196, y, { align: "right" });
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(115, 121, 133);
+      pdf.text(`${g.list.length} tugas`, 190 - pdf.getTextWidth(`${gPct}%`), y, { align: "right" });
+      y = pdfTaskTable(pdf, g.list, y + 4) + 10;
+    });
+  } else {
+    y = pdfTaskTable(pdf, scoped, y);
+  }
+
+  // Footer on every page
+  const pageCount = pdf.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    pdf.setPage(i);
+    pdf.setDrawColor(222, 226, 235);
+    pdf.setLineWidth(0.2);
+    pdf.line(14, 285, 196, 285);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(7.5);
+    pdf.setTextColor(150, 155, 168);
+    pdf.text(`Dibuat dengan TaskFlow — ${todayLabel}`, 14, 290);
+    pdf.text(`Halaman ${i} dari ${pageCount}`, 196, 290, { align: "right" });
+  }
+
+  const fileName = `Laporan_${projName.replace(/[^\w-]+/g, "_")}_${new Date()
+    .toISOString()
+    .slice(0, 10)}.pdf`;
+  pdf.save(fileName);
+}
+
 // ---------- Init ----------
+onSnapshot(projectsCollection, (snapshot) => {
+  projects = snapshot.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  render();
+});
+
 onSnapshot(tasksCollection, (snapshot) => {
   tasks = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
   render();
