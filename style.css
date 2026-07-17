@@ -841,6 +841,58 @@ body {
 
 .modal-close:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+.import-textarea {
+  width: 100%;
+  min-height: 140px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  margin-bottom: 12px;
+}
+
+.import-textarea:focus { border-color: var(--accent); }
+
+.import-options {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.import-options select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 9px 10px;
+  font-size: 13px;
+  outline: none;
+}
+
+.import-options select:focus { border-color: var(--accent); }
+
+.import-confirm-btn {
+  width: 100%;
+  background: var(--accent);
+  color: #14161c;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.import-confirm-btn:hover { background: var(--accent-hover); }
+.import-confirm-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
 /* Responsive */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }

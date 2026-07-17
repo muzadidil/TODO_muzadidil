@@ -83,6 +83,7 @@
           <p id="viewSubtitle">Kelola semua tugasmu di satu tempat</p>
         </div>
         <div class="topbar-actions">
+          <button id="importBtn" class="export-btn" title="Import tugas dari teks">📥 Import</button>
           <button id="exportPdfBtn" class="export-btn" title="Export laporan progres PDF">📄 Export PDF</button>
           <button id="copyTextBtn" class="export-btn" title="Salin daftar tugas sebagai teks">📋 Salin Teks</button>
           <div class="search-box">
@@ -194,6 +195,35 @@
         <button type="button" id="exportProjectConfirmBtn">Export</button>
       </div>
       <button type="button" class="modal-close" id="exportModalClose">✕</button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="importModalOverlay">
+    <div class="modal-box">
+      <h3>Import Tugas dari Teks</h3>
+      <p class="modal-sub">Tempel daftar tugas — satu tugas per baris (pisahkan dengan Enter).</p>
+      <textarea
+        id="importTextarea"
+        class="import-textarea"
+        placeholder="Beli bahan presentasi&#10;Review laporan mingguan&#10;Telepon klien"
+      ></textarea>
+      <div class="import-options">
+        <select id="importProject" title="Proyek">
+          <option value="">Tanpa Proyek</option>
+        </select>
+        <select id="importCategory">
+          <option value="kerja">Kerja</option>
+          <option value="pribadi">Pribadi</option>
+          <option value="belajar">Belajar</option>
+        </select>
+        <select id="importPriority">
+          <option value="low">Rendah</option>
+          <option value="medium" selected>Sedang</option>
+          <option value="high">Tinggi</option>
+        </select>
+      </div>
+      <button type="button" id="importConfirmBtn" class="import-confirm-btn">Import</button>
+      <button type="button" class="modal-close" id="importModalClose">✕</button>
     </div>
   </div>
 

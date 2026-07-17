@@ -168,6 +168,14 @@ const exportOneOption = document.getElementById("exportOneOption");
 const exportProjectPicker = document.getElementById("exportProjectPicker");
 const exportProjectSelect = document.getElementById("exportProjectSelect");
 const exportProjectConfirmBtn = document.getElementById("exportProjectConfirmBtn");
+const importBtn = document.getElementById("importBtn");
+const importModalOverlay = document.getElementById("importModalOverlay");
+const importModalClose = document.getElementById("importModalClose");
+const importTextarea = document.getElementById("importTextarea");
+const importProject = document.getElementById("importProject");
+const importCategory = document.getElementById("importCategory");
+const importPriority = document.getElementById("importPriority");
+const importConfirmBtn = document.getElementById("importConfirmBtn");
 
 let exportMode = "pdf"; // "pdf" | "text"
 
@@ -278,6 +286,76 @@ exportProjectConfirmBtn.addEventListener("click", () => {
   closeExportModal();
   if (exportMode === "text") copyTasksAsText(target);
   else exportPdf(target);
+});
+
+// ---------- Import from text ----------
+importBtn.addEventListener("click", openImportModal);
+importModalClose.addEventListener("click", closeImportModal);
+importModalOverlay.addEventListener("click", (e) => {
+  if (e.target === importModalOverlay) closeImportModal();
+});
+
+function openImportModal() {
+  const current = importProject.value;
+  importProject.innerHTML =
+    `<option value="">Tanpa Proyek</option>` +
+    projects.map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
+  if ([...importProject.options].some((o) => o.value === current)) importProject.value = current;
+  if (state.project !== "all" && projects.some((p) => p.id === state.project)) {
+    importProject.value = state.project;
+  }
+  importTextarea.value = "";
+  importModalOverlay.classList.add("show");
+  importTextarea.focus();
+}
+
+function closeImportModal() {
+  importModalOverlay.classList.remove("show");
+}
+
+importConfirmBtn.addEventListener("click", async () => {
+  const lines = importTextarea.value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    alert("Tempel dulu daftar tugasnya, satu tugas per baris.");
+    return;
+  }
+
+  const projectId = importProject.value;
+  const category = importCategory.value;
+  const priority = importPriority.value;
+  const baseNow = Date.now();
+  const todayStr = new Date(baseNow).toISOString().slice(0, 10);
+
+  importConfirmBtn.disabled = true;
+  importConfirmBtn.textContent = `Mengimport ${lines.length} tugas...`;
+  try {
+    await Promise.all(
+      lines.map((text, i) =>
+        addDoc(tasksCollection, {
+          text,
+          projectId,
+          category,
+          priority,
+          dueDate: todayStr,
+          link: "",
+          deadline: "",
+          completed: false,
+          subtasks: [],
+          createdAt: baseNow + i,
+        })
+      )
+    );
+    closeImportModal();
+  } catch (err) {
+    alert("Gagal mengimport sebagian atau semua tugas. Coba lagi.");
+  } finally {
+    importConfirmBtn.disabled = false;
+    importConfirmBtn.textContent = "Import";
+  }
 });
 
 // ---------- Projects ----------
