@@ -84,6 +84,7 @@
         </div>
         <div class="topbar-actions">
           <button id="exportPdfBtn" class="export-btn" title="Export laporan progres PDF">📄 Export PDF</button>
+          <button id="copyTextBtn" class="export-btn" title="Salin daftar tugas sebagai teks">📋 Salin Teks</button>
           <div class="search-box">
             <span class="search-icon">⌕</span>
             <input type="text" id="searchInput" placeholder="Cari tugas..." />
@@ -176,8 +177,8 @@
 
   <div class="modal-overlay" id="exportModalOverlay">
     <div class="modal-box">
-      <h3>Export Laporan PDF</h3>
-      <p class="modal-sub">Pilih cakupan laporan yang ingin diexport.</p>
+      <h3 id="exportModalTitle">Export Laporan PDF</h3>
+      <p class="modal-sub" id="exportModalSub">Pilih cakupan laporan yang ingin diexport.</p>
       <div class="modal-options">
         <button type="button" class="modal-option" id="exportAllOption">
           <span class="modal-option-title">Seluruh Proyek</span>

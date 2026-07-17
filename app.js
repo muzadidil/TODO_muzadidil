@@ -158,13 +158,18 @@ const addProjectBtn = document.getElementById("addProjectBtn");
 const projectAddRow = document.getElementById("projectAddRow");
 const projectNameInput = document.getElementById("projectNameInput");
 const exportPdfBtn = document.getElementById("exportPdfBtn");
+const copyTextBtn = document.getElementById("copyTextBtn");
 const exportModalOverlay = document.getElementById("exportModalOverlay");
+const exportModalTitle = document.getElementById("exportModalTitle");
+const exportModalSub = document.getElementById("exportModalSub");
 const exportModalClose = document.getElementById("exportModalClose");
 const exportAllOption = document.getElementById("exportAllOption");
 const exportOneOption = document.getElementById("exportOneOption");
 const exportProjectPicker = document.getElementById("exportProjectPicker");
 const exportProjectSelect = document.getElementById("exportProjectSelect");
 const exportProjectConfirmBtn = document.getElementById("exportProjectConfirmBtn");
+
+let exportMode = "pdf"; // "pdf" | "text"
 
 // ---------- Event bindings ----------
 addTaskBtn.addEventListener("click", addTask);
@@ -223,9 +228,15 @@ document.querySelectorAll(".chip").forEach((btn) => {
   });
 });
 
-exportPdfBtn.addEventListener("click", openExportModal);
+exportPdfBtn.addEventListener("click", () => openExportModal("pdf"));
+copyTextBtn.addEventListener("click", () => openExportModal("text"));
 
-function openExportModal() {
+function openExportModal(mode) {
+  exportMode = mode;
+  exportModalTitle.textContent = mode === "text" ? "Salin Daftar Tugas sebagai Teks" : "Export Laporan PDF";
+  exportModalSub.textContent = mode === "text"
+    ? "Pilih cakupan tugas yang ingin disalin sebagai teks."
+    : "Pilih cakupan laporan yang ingin diexport.";
   exportProjectSelect.innerHTML = projects
     .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`)
     .join("");
@@ -249,7 +260,8 @@ exportModalOverlay.addEventListener("click", (e) => {
 
 exportAllOption.addEventListener("click", () => {
   closeExportModal();
-  exportPdf("all");
+  if (exportMode === "text") copyTasksAsText("all");
+  else exportPdf("all");
 });
 
 exportOneOption.addEventListener("click", () => {
@@ -257,13 +269,15 @@ exportOneOption.addEventListener("click", () => {
     alert("Belum ada proyek untuk diexport. Buat proyek terlebih dahulu.");
     return;
   }
+  exportProjectConfirmBtn.textContent = exportMode === "text" ? "Salin" : "Export";
   exportProjectPicker.style.display = "flex";
 });
 
 exportProjectConfirmBtn.addEventListener("click", () => {
   const target = exportProjectSelect.value;
   closeExportModal();
-  exportPdf(target);
+  if (exportMode === "text") copyTasksAsText(target);
+  else exportPdf(target);
 });
 
 // ---------- Projects ----------
@@ -885,6 +899,124 @@ function exportPdf(target) {
     .toISOString()
     .slice(0, 10)}.pdf`;
   pdf.save(fileName);
+}
+
+// ---------- Copy as Text ----------
+function flattenSubtasksForText(nodes, depth, lines) {
+  (nodes || []).forEach((s) => {
+    lines.push("  ".repeat(depth + 1) + (s.completed ? "[x] " : "[ ] ") + s.text);
+    flattenSubtasksForText(s.children, depth + 1, lines);
+  });
+}
+
+function taskLineForText(t) {
+  const meta = [
+    CATEGORY_LABELS[t.category],
+    PRIORITY_LABELS[t.priority] ? `Prioritas ${PRIORITY_LABELS[t.priority]}` : null,
+    t.deadline ? `deadline ${formatDate(t.deadline)}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return `[${t.completed ? "x" : " "}] ${t.text}` + (meta ? ` (${meta})` : "");
+}
+
+function appendTaskGroupText(list, lines) {
+  const belum = list.filter((t) => !t.completed);
+  const selesai = list.filter((t) => t.completed);
+
+  lines.push(`BELUM SELESAI (${belum.length})`);
+  if (!belum.length) {
+    lines.push("  (tidak ada)");
+  } else {
+    belum.forEach((t) => {
+      lines.push(taskLineForText(t));
+      flattenSubtasksForText(t.subtasks, 0, lines);
+    });
+  }
+  lines.push("");
+  lines.push(`SELESAI (${selesai.length})`);
+  if (!selesai.length) {
+    lines.push("  (tidak ada)");
+  } else {
+    selesai.forEach((t) => {
+      lines.push(taskLineForText(t));
+      flattenSubtasksForText(t.subtasks, 0, lines);
+    });
+  }
+}
+
+function buildTasksText(target) {
+  const isAll = target === "all";
+  const proj = projects.find((p) => p.id === target);
+  const projName = isAll ? "Semua Proyek" : proj ? proj.name : "Tanpa Proyek";
+  const scoped = isAll ? tasks : tasks.filter((t) => (t.projectId || "") === target);
+  const todayLabel = new Date().toLocaleDateString("id-ID", {
+    day: "numeric", month: "long", year: "numeric",
+  });
+
+  const lines = [];
+  lines.push(`TaskFlow — Daftar Tugas: ${projName}`);
+  lines.push(todayLabel);
+  lines.push(`Progres keseluruhan: ${meanProgress(scoped)}%`);
+  lines.push("");
+
+  if (!scoped.length) {
+    lines.push("Belum ada tugas.");
+    return lines.join("\n");
+  }
+
+  if (isAll) {
+    const groups = projects.map((p) => ({ name: p.name, list: tasks.filter((t) => t.projectId === p.id) }));
+    const noProj = tasks.filter((t) => !projects.some((p) => p.id === t.projectId));
+    if (noProj.length) groups.push({ name: "Tanpa Proyek", list: noProj });
+
+    let first = true;
+    groups.forEach((g) => {
+      if (!g.list.length) return;
+      if (!first) lines.push("");
+      first = false;
+      lines.push(`===== ${g.name} (${meanProgress(g.list)}%) =====`);
+      appendTaskGroupText(g.list, lines);
+    });
+  } else {
+    appendTaskGroupText(scoped, lines);
+  }
+
+  return lines.join("\n");
+}
+
+function flashCopySuccess() {
+  const original = copyTextBtn.textContent;
+  copyTextBtn.textContent = "✅ Tersalin!";
+  copyTextBtn.disabled = true;
+  setTimeout(() => {
+    copyTextBtn.textContent = original;
+    copyTextBtn.disabled = false;
+  }, 1500);
+}
+
+async function copyTasksAsText(target) {
+  const text = buildTasksText(target);
+  try {
+    await navigator.clipboard.writeText(text);
+    flashCopySuccess();
+    return;
+  } catch (err) {
+    // Clipboard API unavailable (non-secure context / older browser) — fall back.
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+    flashCopySuccess();
+  } catch (e) {
+    alert("Gagal menyalin otomatis. Berikut teksnya:\n\n" + text);
+  }
+  document.body.removeChild(ta);
 }
 
 // ---------- Init ----------
