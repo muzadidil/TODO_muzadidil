@@ -72,7 +72,7 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-const CATEGORY_LABELS = { kerja: "Kerja", pribadi: "Pribadi", belajar: "Belajar" };
+const CATEGORY_LABELS = { kerja: "Kerja", pribadi: "Pribadi", belajar: "Belajar", bug: "Bug" };
 const PRIORITY_LABELS = { high: "Tinggi", medium: "Sedang", low: "Rendah" };
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
 const PROJECT_COLORS = ["#8da2fb", "#5fd39a", "#f0c04c", "#f08484", "#b8a7f0", "#64b5f6", "#4dd0e1", "#ffb74d"];

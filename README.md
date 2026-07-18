@@ -17,7 +17,7 @@ Aplikasi manajemen tugas berbasis web, disusun per proyek, dengan sub-tugas bert
 - **Progres otomatis**
   - Setiap tugas utama menampilkan bar + persentase progres berdasarkan sub-tugas yang selesai (dihitung dari seluruh level nested).
   - Statistik atas (Total, Belum Selesai, Selesai, Progress) dan progress card di sidebar mengikuti rata-rata persentase ini.
-- **Kategori & prioritas** — Kerja / Pribadi / Belajar, dan Tinggi / Sedang / Rendah.
+- **Kategori & prioritas** — Kerja / Pribadi / Belajar / Bug, dan Tinggi / Sedang / Rendah. Kategori **Bug** dipakai untuk pencatatan bug — tetap berupa tugas biasa (todo) sehingga otomatis ikut terhitung di statistik, progres, dan export PDF.
 - **Deadline & link opsional** per tugas maupun per sub-tugas, dengan badge status (normal / mendekati deadline / terlambat).
 - **Pencarian, filter, dan pengurutan** — cari berdasarkan teks, filter berdasarkan status/kategori/prioritas, urutkan berdasarkan terbaru/terlama/prioritas/tenggat waktu.
 - **Filter navigasi cepat** — Semua Tugas, Hari Ini, Belum Selesai, Selesai, Terlambat.

@@ -566,6 +566,7 @@ body {
 .badge-kerja { background: var(--accent-soft); color: var(--accent-hover); }
 .badge-pribadi { background: var(--success-soft); color: var(--success); }
 .badge-belajar { background: var(--warning-soft); color: var(--warning); }
+.badge-bug { background: var(--danger-soft); color: var(--danger); }
 .badge-project { background: var(--violet-soft); color: var(--violet); }
 
 .priority-dot { width: 7px; height: 7px; border-radius: 50%; }
