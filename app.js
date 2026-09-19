@@ -1308,12 +1308,15 @@ function buildWhatsAppText(target) {
   return lines.join("\n");
 }
 
+const CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
 function flashCopySuccess(btn) {
-  const original = btn.textContent;
-  btn.textContent = "✅ Tersalin!";
+  // innerHTML, bukan textContent — kalau tidak, ikon SVG di dalam tombol ikut terhapus
+  const original = btn.innerHTML;
+  btn.innerHTML = `${CHECK_ICON}<span>Tersalin!</span>`;
   btn.disabled = true;
   setTimeout(() => {
-    btn.textContent = original;
+    btn.innerHTML = original;
     btn.disabled = false;
   }, 1500);
 }
