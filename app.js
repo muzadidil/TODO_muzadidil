@@ -183,6 +183,7 @@ const importPriority = document.getElementById("importPriority");
 const importConfirmBtn = document.getElementById("importConfirmBtn");
 const selectModeBtn = document.getElementById("selectModeBtn");
 const bulkBar = document.getElementById("bulkBar");
+const selectAllCheckbox = document.getElementById("selectAllCheckbox");
 const bulkCount = document.getElementById("bulkCount");
 const bulkCompleteBtn = document.getElementById("bulkCompleteBtn");
 const bulkArchiveBtn = document.getElementById("bulkArchiveBtn");
@@ -251,6 +252,17 @@ selectModeBtn.addEventListener("click", () => {
   state.selectMode = !state.selectMode;
   state.selected.clear();
   selectModeBtn.classList.toggle("active", state.selectMode);
+  render();
+});
+
+selectAllCheckbox.addEventListener("click", () => {
+  const visibleIds = getFilteredTasks().map((t) => t.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => state.selected.has(id));
+  if (allSelected) {
+    visibleIds.forEach((id) => state.selected.delete(id));
+  } else {
+    visibleIds.forEach((id) => state.selected.add(id));
+  }
   render();
 });
 
@@ -699,6 +711,11 @@ function updateBulkBar() {
   bulkCount.textContent = `${n} dipilih`;
   bulkArchiveBtn.disabled = n === 0;
   bulkCompleteBtn.disabled = n === 0;
+
+  const visibleIds = getFilteredTasks().map((t) => t.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => state.selected.has(id));
+  selectAllCheckbox.classList.toggle("checked", allSelected);
+  selectAllCheckbox.textContent = allSelected ? "✓" : "";
 }
 
 function renderStats() {
