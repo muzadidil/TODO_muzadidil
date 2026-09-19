@@ -636,6 +636,7 @@ body {
 .task-action-btn.delete:hover { background: var(--danger-soft); color: var(--danger); }
 .task-action-btn.expand { transition: transform 0.15s, background 0.15s, color 0.15s; }
 .task-action-btn.expand.open { transform: rotate(180deg); color: var(--accent-hover); }
+.task-action-btn.restore:hover { background: var(--accent-soft); color: var(--accent-hover); }
 
 /* Subtasks */
 .subtask-panel {

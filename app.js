@@ -60,6 +60,8 @@ function isOverdue(t) {
   return !t.completed && deadlineStatus(t.deadline) === "overdue";
 }
 
+const ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000; // auto-arsip 1 hari setelah selesai
+
 function escapeAttr(str) {
   return String(str).replace(/"/g, "&quot;");
 }
@@ -130,9 +132,10 @@ function meanProgress(list) {
   return Math.round(list.reduce((sum, t) => sum + taskProgress(t), 0) / list.length);
 }
 
-function projectScopedTasks() {
-  if (state.project === "all") return tasks;
-  return tasks.filter((t) => (t.projectId || "") === state.project);
+function projectScopedTasks(list) {
+  const base = list || tasks.filter((t) => !t.archived);
+  if (state.project === "all") return base;
+  return base.filter((t) => (t.projectId || "") === state.project);
 }
 
 // ---------- DOM refs ----------
@@ -344,6 +347,8 @@ importConfirmBtn.addEventListener("click", async () => {
           link: "",
           deadline: "",
           completed: false,
+          completedAt: null,
+          archived: false,
           subtasks: [],
           createdAt: baseNow + i,
         })
@@ -409,8 +414,9 @@ async function deleteProject(id) {
 }
 
 function renderProjects() {
+  const activeTasks = tasks.filter((t) => !t.archived);
   const counts = {};
-  tasks.forEach((t) => {
+  activeTasks.forEach((t) => {
     const pid = t.projectId || "";
     counts[pid] = (counts[pid] || 0) + 1;
   });
@@ -419,11 +425,11 @@ function renderProjects() {
     <button class="nav-item proj-item ${state.project === "all" ? "active" : ""}" data-project="all">
       <span class="nav-icon">▤</span>
       <span class="proj-name">Semua Proyek</span>
-      <span class="proj-count">${tasks.length}</span>
+      <span class="proj-count">${activeTasks.length}</span>
     </button>`;
 
   projects.forEach((p, i) => {
-    const scoped = tasks.filter((t) => t.projectId === p.id);
+    const scoped = activeTasks.filter((t) => t.projectId === p.id);
     const pct = meanProgress(scoped);
     html += `
     <button class="nav-item proj-item ${state.project === p.id ? "active" : ""}" data-project="${p.id}">
@@ -464,6 +470,7 @@ function updateViewTitle() {
     active: ["Belum Selesai", "Tugas yang masih perlu dikerjakan"],
     completed: ["Selesai", "Tugas yang sudah kamu selesaikan"],
     overdue: ["Terlambat", "Tugas yang sudah lewat deadline"],
+    archived: ["Arsip", "Tugas selesai yang sudah diarsipkan otomatis (1 hari setelah selesai)"],
   };
   let [title, subtitle] = map[state.navFilter];
 
@@ -494,6 +501,8 @@ async function addTask() {
     link: taskLinkInput.value.trim(),
     deadline: taskDeadlineInput.value || "",
     completed: false,
+    completedAt: null,
+    archived: false,
     subtasks: [],
     createdAt: now,
   });
@@ -510,11 +519,33 @@ async function addTask() {
 async function toggleTask(id) {
   const t = tasks.find((t) => t.id === id);
   if (!t) return;
-  await updateDoc(doc(db, "tasks", id), { completed: !t.completed });
+  const completed = !t.completed;
+  await updateDoc(doc(db, "tasks", id), {
+    completed,
+    completedAt: completed ? Date.now() : null,
+    archived: completed ? !!t.archived : false,
+  });
 }
 
 async function deleteTask(id) {
   await deleteDoc(doc(db, "tasks", id));
+}
+
+async function restoreTask(id) {
+  await updateDoc(doc(db, "tasks", id), { archived: false });
+}
+
+async function autoArchiveOldTasks() {
+  const now = Date.now();
+  for (const t of tasks) {
+    if (!t.completed || t.archived) continue;
+    if (!t.completedAt) {
+      // tugas selesai dari sebelum fitur arsip ada — arsipkan langsung
+      await updateDoc(doc(db, "tasks", t.id), { completedAt: now - ARCHIVE_AFTER_MS, archived: true });
+    } else if (now - t.completedAt >= ARCHIVE_AFTER_MS) {
+      await updateDoc(doc(db, "tasks", t.id), { archived: true });
+    }
+  }
 }
 
 function toggleExpand(id) {
@@ -547,7 +578,11 @@ async function deleteSubtask(taskId, subId) {
 
 // ---------- Filtering / sorting ----------
 function getFilteredTasks() {
-  let list = projectScopedTasks().slice();
+  let list = (
+    state.navFilter === "archived"
+      ? projectScopedTasks(tasks.filter((t) => t.archived))
+      : projectScopedTasks()
+  ).slice();
 
   if (state.navFilter === "today") list = list.filter((t) => isToday(t.dueDate));
   if (state.navFilter === "active") list = list.filter((t) => !t.completed);
@@ -676,7 +711,9 @@ function renderTasks() {
         </div>
       </div>
       <div class="task-actions">
-        <button class="task-action-btn expand ${isExpanded ? "open" : ""}" data-id="${t.id}" data-action="expand">▾</button>
+        ${state.navFilter === "archived"
+          ? `<button class="task-action-btn restore" data-id="${t.id}" data-action="restore" title="Kembalikan dari arsip">↩</button>`
+          : `<button class="task-action-btn expand ${isExpanded ? "open" : ""}" data-id="${t.id}" data-action="expand">▾</button>`}
         <button class="task-action-btn delete" data-id="${t.id}" data-action="delete">🗑</button>
       </div>
     `;
@@ -702,6 +739,7 @@ taskListEl.addEventListener("click", (e) => {
   if (action === "toggle") toggleTask(btn.dataset.id);
   if (action === "delete") deleteTask(btn.dataset.id);
   if (action === "expand") toggleExpand(btn.dataset.id);
+  if (action === "restore") restoreTask(btn.dataset.id);
   if (action === "toggle-sub") toggleSubtask(btn.dataset.taskId, btn.dataset.subId);
   if (action === "delete-sub") deleteSubtask(btn.dataset.taskId, btn.dataset.subId);
   if (action === "add-sub-toggle") {
@@ -1108,4 +1146,7 @@ onSnapshot(projectsCollection, (snapshot) => {
 onSnapshot(tasksCollection, (snapshot) => {
   tasks = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
   render();
+  autoArchiveOldTasks();
 });
+
+setInterval(autoArchiveOldTasks, 30 * 60 * 1000); // cek arsip tiap 30 menit
