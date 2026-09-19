@@ -89,6 +89,7 @@
           <p id="viewSubtitle">Kelola semua tugasmu di satu tempat</p>
         </div>
         <div class="topbar-actions">
+          <button id="selectModeBtn" class="export-btn" title="Pilih beberapa tugas untuk diarsipkan manual">☑ Pilih</button>
           <button id="importBtn" class="export-btn" title="Import tugas dari teks">📥 Import</button>
           <button id="exportPdfBtn" class="export-btn" title="Export laporan progres PDF">📄 Export PDF</button>
           <button id="copyTextBtn" class="export-btn" title="Salin daftar tugas sebagai teks">📋 Salin Teks</button>
@@ -171,6 +172,12 @@
           <option value="due">Tenggat Waktu</option>
         </select>
       </section>
+
+      <div class="bulk-bar" id="bulkBar" style="display:none;">
+        <span id="bulkCount">0 dipilih</span>
+        <button type="button" id="bulkArchiveBtn">📦 Arsipkan Terpilih</button>
+        <button type="button" id="bulkCancelBtn">Batal</button>
+      </div>
 
       <section class="task-list" id="taskList">
         <!-- Tasks rendered here -->

@@ -22,6 +22,8 @@ let state = {
   sort: "newest",
   expanded: new Set(),    // task ids with subtasks panel open
   subAddOpen: new Set(),  // "taskId:subId" with nested add-row open
+  selectMode: false,      // manual multi-select mode for bulk archive
+  selected: new Set(),    // task ids selected in selectMode
 };
 
 function uid() {
@@ -179,6 +181,11 @@ const importProject = document.getElementById("importProject");
 const importCategory = document.getElementById("importCategory");
 const importPriority = document.getElementById("importPriority");
 const importConfirmBtn = document.getElementById("importConfirmBtn");
+const selectModeBtn = document.getElementById("selectModeBtn");
+const bulkBar = document.getElementById("bulkBar");
+const bulkCount = document.getElementById("bulkCount");
+const bulkArchiveBtn = document.getElementById("bulkArchiveBtn");
+const bulkCancelBtn = document.getElementById("bulkCancelBtn");
 
 let exportMode = "pdf"; // "pdf" | "text"
 
@@ -237,6 +244,43 @@ document.querySelectorAll(".chip").forEach((btn) => {
     state.priority = btn.dataset.priority;
     render();
   });
+});
+
+selectModeBtn.addEventListener("click", () => {
+  state.selectMode = !state.selectMode;
+  state.selected.clear();
+  selectModeBtn.classList.toggle("active", state.selectMode);
+  render();
+});
+
+bulkCancelBtn.addEventListener("click", () => {
+  state.selectMode = false;
+  state.selected.clear();
+  selectModeBtn.classList.remove("active");
+  render();
+});
+
+bulkArchiveBtn.addEventListener("click", async () => {
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  bulkArchiveBtn.disabled = true;
+  try {
+    await Promise.all(
+      ids.map((id) => {
+        const t = tasks.find((t) => t.id === id);
+        return updateDoc(doc(db, "tasks", id), {
+          archived: true,
+          completedAt: t && t.completedAt ? t.completedAt : Date.now(),
+        });
+      })
+    );
+  } finally {
+    bulkArchiveBtn.disabled = false;
+    state.selectMode = false;
+    state.selected.clear();
+    selectModeBtn.classList.remove("active");
+    render();
+  }
 });
 
 exportPdfBtn.addEventListener("click", () => openExportModal("pdf"));
@@ -615,11 +659,25 @@ function getFilteredTasks() {
 
 // ---------- Rendering ----------
 function render() {
+  if (state.navFilter === "archived" && state.selectMode) {
+    state.selectMode = false;
+    state.selected.clear();
+    selectModeBtn.classList.remove("active");
+  }
+  selectModeBtn.style.display = state.navFilter === "archived" ? "none" : "";
   renderProjects();
   populateTaskProjectSelect();
   updateViewTitle();
   renderStats();
   renderTasks();
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const n = state.selected.size;
+  bulkBar.style.display = state.selectMode ? "flex" : "none";
+  bulkCount.textContent = `${n} dipilih`;
+  bulkArchiveBtn.disabled = n === 0;
 }
 
 function renderStats() {
@@ -687,10 +745,12 @@ function renderTasks() {
     const wrap = document.createElement("div");
     wrap.className = "task-wrap";
 
+    const isSelected = state.selected.has(t.id);
     const item = document.createElement("div");
-    item.className = "task-item" + (t.completed ? " completed" : "");
+    item.className = "task-item" + (t.completed ? " completed" : "") + (isSelected ? " selected" : "");
 
     item.innerHTML = `
+      ${state.selectMode ? `<button class="select-checkbox ${isSelected ? "checked" : ""}" data-id="${t.id}" data-action="select">${isSelected ? "✓" : ""}</button>` : ""}
       <button class="task-checkbox ${t.completed ? "checked" : ""}" data-id="${t.id}" data-action="toggle">${t.completed ? "✓" : ""}</button>
       <div class="task-body">
         <div class="task-text"></div>
@@ -736,6 +796,13 @@ taskListEl.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
   const action = btn.dataset.action;
+  if (action === "select") {
+    const id = btn.dataset.id;
+    if (state.selected.has(id)) state.selected.delete(id);
+    else state.selected.add(id);
+    render();
+    return;
+  }
   if (action === "toggle") toggleTask(btn.dataset.id);
   if (action === "delete") deleteTask(btn.dataset.id);
   if (action === "expand") toggleExpand(btn.dataset.id);
