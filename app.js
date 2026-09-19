@@ -24,8 +24,8 @@ let state = {
   subAddOpen: new Set(),  // "taskId:subId" with nested add-row open
   selectMode: false,      // manual multi-select mode for bulk archive
   selected: new Set(),    // task ids selected in selectMode
-  editing: null,          // { taskId } atau { taskId, subId } yang teksnya sedang diedit
-  editValue: "",          // nilai input edit, disimpan agar tidak hilang saat re-render
+  editing: null,          // { taskId } atau { taskId, subId } yang sedang diedit
+  editDraft: {},          // isian form edit, disimpan agar tidak hilang saat re-render
   editingProject: null,   // id proyek yang namanya sedang diubah
   editProjectValue: "",
 };
@@ -733,18 +733,29 @@ async function autoArchiveOldTasks() {
   }
 }
 
+const EDITABLE_FIELDS = ["projectId", "category", "priority", "deadline", "link"];
+
 function startEdit(taskId, subId) {
   const t = tasks.find((t) => t.id === taskId);
   if (!t) return;
-  let current = t.text;
+
   if (subId) {
     const node = findNodeInTree(t.subtasks || [], subId);
     if (!node) return;
-    current = node.text;
     state.expanded.add(taskId);
+    state.editing = { taskId, subId };
+    state.editDraft = { text: node.text };
+  } else {
+    state.editing = { taskId };
+    state.editDraft = {
+      text: t.text,
+      projectId: t.projectId || "",
+      category: t.category,
+      priority: t.priority,
+      deadline: t.deadline || "",
+      link: t.link || "",
+    };
   }
-  state.editing = subId ? { taskId, subId } : { taskId };
-  state.editValue = current;
   render();
 }
 
@@ -759,19 +770,20 @@ function findNodeInTree(nodes, subId) {
 
 function cancelEdit() {
   state.editing = null;
-  state.editValue = "";
+  state.editDraft = {};
   render();
 }
 
 async function saveEdit() {
   const edit = state.editing;
   if (!edit) return;
-  const text = state.editValue.trim();
+  const draft = state.editDraft;
+  const text = (draft.text || "").trim();
   const t = tasks.find((t) => t.id === edit.taskId);
 
   // dibersihkan lebih dulu supaya blur setelah re-render tidak menyimpan dua kali
   state.editing = null;
-  state.editValue = "";
+  state.editDraft = {};
 
   if (!t || !text) {
     render();
@@ -786,8 +798,19 @@ async function saveEdit() {
       });
       return;
     }
-  } else if (t.text !== text) {
-    await updateDoc(doc(db, "tasks", t.id), { text });
+    render();
+    return;
+  }
+
+  const patch = {};
+  if (t.text !== text) patch.text = text;
+  for (const field of EDITABLE_FIELDS) {
+    const next = (draft[field] || "").trim();
+    if ((t[field] || "") !== next) patch[field] = next;
+  }
+
+  if (Object.keys(patch).length) {
+    await updateDoc(doc(db, "tasks", t.id), patch);
     return;
   }
   render();
@@ -913,7 +936,7 @@ function renderSubtree(taskId, nodes, depth) {
       <div class="subtask-item" style="margin-left:${depth * 22}px">
         <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? ICONS.check : ""}</button>
         ${isEditing
-          ? `<input class="task-edit-input sub" type="text" value="${escapeAttr(state.editValue)}" data-edit="1" />`
+          ? `<input class="task-edit-input sub" type="text" value="${escapeAttr(state.editDraft.text || "")}" data-edit="1" />`
           : `<span class="subtask-text ${s.completed ? "done" : ""}">${escapeHtml(s.text)}</span>`}
         ${s.link ? `<a class="link-badge" href="${escapeAttr(s.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
         <button class="task-action-btn edit" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="edit-sub" title="Ubah teks">${ICONS.edit}</button>
@@ -934,6 +957,38 @@ function renderSubAddRow(taskId, parentId, depth) {
       <input type="text" class="subtask-input" placeholder="Tambah sub-tugas..." data-task-id="${taskId}" data-parent-id="${parentId}" />
       <button type="button" class="subtask-link-btn" data-task-id="${taskId}" data-parent-id="${parentId}" title="Tambah link">🔗</button>
       <input type="url" class="subtask-link-input" placeholder="https://..." data-task-id="${taskId}" data-parent-id="${parentId}" style="display:none;" />
+    </div>`;
+}
+
+function optionsHtml(items, selected) {
+  return items
+    .map(
+      ([value, label]) =>
+        `<option value="${escapeAttr(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`
+    )
+    .join("");
+}
+
+function renderTaskEditForm() {
+  const d = state.editDraft;
+  const projectOptions = [["", "Tanpa Proyek"], ...projects.map((p) => [p.id, p.name])];
+  const categoryOptions = Object.entries(CATEGORY_LABELS);
+  const priorityOptions = [["high", "Tinggi"], ["medium", "Sedang"], ["low", "Rendah"]];
+
+  return `
+    <div class="task-edit">
+      <input class="task-edit-input" type="text" value="${escapeAttr(d.text || "")}" data-edit="1" placeholder="Teks tugas" />
+      <div class="task-edit-fields">
+        <select data-edit-field="projectId" title="Proyek">${optionsHtml(projectOptions, d.projectId || "")}</select>
+        <select data-edit-field="category" title="Kategori">${optionsHtml(categoryOptions, d.category)}</select>
+        <select data-edit-field="priority" title="Prioritas">${optionsHtml(priorityOptions, d.priority)}</select>
+        <input type="date" data-edit-field="deadline" value="${escapeAttr(d.deadline || "")}" title="Deadline" />
+        <input type="url" data-edit-field="link" value="${escapeAttr(d.link || "")}" placeholder="https://..." title="Link" />
+        <div class="task-edit-actions">
+          <button type="button" class="edit-save-btn" data-action="edit-save">${ICONS.check}<span>Simpan</span></button>
+          <button type="button" class="edit-cancel-btn" data-action="edit-cancel">Batal</button>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -966,9 +1021,7 @@ function renderTasks() {
       ${state.selectMode ? `<button class="select-checkbox ${isSelected ? "checked" : ""}" data-id="${t.id}" data-action="select">${isSelected ? ICONS.check : ""}</button>` : ""}
       <button class="task-checkbox ${t.completed ? "checked" : ""}" data-id="${t.id}" data-action="toggle">${t.completed ? ICONS.check : ""}</button>
       <div class="task-body">
-        ${isEditing
-          ? `<input class="task-edit-input" type="text" value="${escapeAttr(state.editValue)}" data-edit="1" />`
-          : `<div class="task-text"></div>`}
+        ${isEditing ? renderTaskEditForm() : `<div class="task-text"></div>`}
         <div class="task-meta">
           ${proj && state.project === "all" ? `<span class="task-badge badge-project">📁 ${escapeHtml(proj.name)}</span>` : ""}
           <span class="task-badge badge-${t.category}">${CATEGORY_LABELS[t.category]}</span>
@@ -1031,6 +1084,14 @@ taskListEl.addEventListener("click", (e) => {
     startEdit(btn.dataset.id, null);
     return;
   }
+  if (action === "edit-save") {
+    saveEdit();
+    return;
+  }
+  if (action === "edit-cancel") {
+    cancelEdit();
+    return;
+  }
   if (action === "edit-sub") {
     startEdit(btn.dataset.taskId, btn.dataset.subId);
     return;
@@ -1069,21 +1130,27 @@ taskListEl.addEventListener("click", (e) => {
 });
 
 taskListEl.addEventListener("input", (e) => {
-  if (e.target.dataset.edit) state.editValue = e.target.value;
+  if (e.target.dataset.edit) state.editDraft.text = e.target.value;
 });
 
-// klik di luar input dianggap simpan, supaya hasil ketikan tidak hilang tanpa sebab
+taskListEl.addEventListener("change", (e) => {
+  const field = e.target.dataset.editField;
+  if (field) state.editDraft[field] = e.target.value;
+});
+
+// Sub-tugas hanya berisi teks, jadi klik ke luar aman dianggap simpan. Form tugas
+// tidak begitu: berpindah antar dropdown akan ikut menutup form.
 taskListEl.addEventListener("focusout", (e) => {
-  if (e.target.dataset.edit && state.editing) {
-    state.editValue = e.target.value;
+  if (e.target.dataset.edit && state.editing && state.editing.subId) {
+    state.editDraft.text = e.target.value;
     saveEdit();
   }
 });
 
 taskListEl.addEventListener("keydown", (e) => {
-  if (e.target.dataset.edit) {
+  if (e.target.dataset.edit || e.target.dataset.editField) {
     if (e.key === "Enter") {
-      state.editValue = e.target.value;
+      if (e.target.dataset.edit) state.editDraft.text = e.target.value;
       saveEdit();
     } else if (e.key === "Escape") {
       cancelEdit();

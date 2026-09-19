@@ -751,6 +751,61 @@ body {
 }
 .task-edit-input.sub { font-size: 13px; font-weight: 400; padding: 4px 8px; }
 
+.task-edit { display: flex; flex-direction: column; gap: 8px; }
+
+.task-edit-fields {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.task-edit-fields select,
+.task-edit-fields input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text-primary);
+  padding: 6px 9px;
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.task-edit-fields select:focus,
+.task-edit-fields input:focus { border-color: var(--accent); }
+.task-edit-fields input[type="url"] { flex: 1; min-width: 130px; }
+
+.task-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.edit-save-btn,
+.edit-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 13px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.12s, background 0.12s, transform 0.06s;
+}
+
+.edit-save-btn { background: var(--accent); color: #ffffff; }
+.edit-save-btn:hover { background: var(--accent-hover); }
+.edit-save-btn svg { width: 14px; height: 14px; }
+.edit-cancel-btn { background: transparent; color: var(--text-secondary); }
+.edit-cancel-btn:hover { background: var(--bg-hover); }
+.edit-save-btn:active, .edit-cancel-btn:active { transform: translateY(1px); }
+
 .task-action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .task-action-btn.edit:hover { background: var(--accent-soft); color: var(--accent-hover); }
 .task-action-btn.delete:hover { background: var(--danger-soft); color: var(--danger); }
