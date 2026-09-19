@@ -175,17 +175,34 @@ body {
 .proj-pct { font-weight: 600; }
 .proj-item.active .proj-pct { color: var(--accent-hover); }
 
-.proj-del {
+.proj-act {
   display: none;
-  font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
-  padding: 2px;
+  padding: 3px;
   border-radius: 4px;
+  line-height: 0;
 }
 
-.proj-item:hover .proj-del { display: inline-block; }
+.proj-act svg { width: 13px; height: 13px; }
+.proj-item:hover .proj-act { display: inline-block; }
+.proj-act:hover { color: var(--accent-hover); background: var(--accent-soft); }
 .proj-del:hover { color: var(--danger); background: var(--danger-soft); }
+
+.proj-item.editing { background: var(--accent-soft); }
+
+.proj-edit-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 4px 7px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
 
 .cat-dot {
   width: 8px;

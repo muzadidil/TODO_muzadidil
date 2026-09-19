@@ -26,6 +26,8 @@ let state = {
   selected: new Set(),    // task ids selected in selectMode
   editing: null,          // { taskId } atau { taskId, subId } yang teksnya sedang diedit
   editValue: "",          // nilai input edit, disimpan agar tidak hilang saat re-render
+  editingProject: null,   // id proyek yang namanya sedang diubah
+  editProjectValue: "",
 };
 
 const ICONS = {
@@ -493,6 +495,12 @@ projectNameInput.addEventListener("keydown", async (e) => {
 });
 
 projectListEl.addEventListener("click", (e) => {
+  const rename = e.target.closest("[data-rename-project]");
+  if (rename) {
+    e.stopPropagation();
+    startProjectRename(rename.dataset.renameProject);
+    return;
+  }
   const del = e.target.closest("[data-del-project]");
   if (del) {
     e.stopPropagation();
@@ -505,6 +513,56 @@ projectListEl.addEventListener("click", (e) => {
   if (state.project !== "all") taskProject.value = state.project;
   render();
 });
+
+projectListEl.addEventListener("input", (e) => {
+  if (e.target.dataset.editProject) state.editProjectValue = e.target.value;
+});
+
+projectListEl.addEventListener("keydown", (e) => {
+  if (!e.target.dataset.editProject) return;
+  if (e.key === "Enter") {
+    state.editProjectValue = e.target.value;
+    saveProjectRename();
+  } else if (e.key === "Escape") {
+    cancelProjectRename();
+  }
+});
+
+projectListEl.addEventListener("focusout", (e) => {
+  if (e.target.dataset.editProject && state.editingProject) {
+    state.editProjectValue = e.target.value;
+    saveProjectRename();
+  }
+});
+
+function startProjectRename(id) {
+  const p = projects.find((p) => p.id === id);
+  if (!p) return;
+  state.editingProject = id;
+  state.editProjectValue = p.name;
+  render();
+}
+
+function cancelProjectRename() {
+  state.editingProject = null;
+  state.editProjectValue = "";
+  render();
+}
+
+async function saveProjectRename() {
+  const id = state.editingProject;
+  const name = state.editProjectValue.trim();
+  const p = projects.find((p) => p.id === id);
+
+  state.editingProject = null;
+  state.editProjectValue = "";
+
+  if (p && name && p.name !== name) {
+    await updateDoc(doc(db, "projects", id), { name });
+    return;
+  }
+  render();
+}
 
 async function deleteProject(id) {
   const p = projects.find((p) => p.id === id);
@@ -537,12 +595,24 @@ function renderProjects() {
   projects.forEach((p, i) => {
     const scoped = activeTasks.filter((t) => t.projectId === p.id);
     const pct = meanProgress(scoped);
+
+    if (state.editingProject === p.id) {
+      // dirender sebagai div, bukan button, agar input tidak bersarang di dalam tombol
+      html += `
+      <div class="nav-item proj-item editing">
+        <span class="cat-dot" style="background:${projColor(i)}"></span>
+        <input class="proj-edit-input" type="text" value="${escapeAttr(state.editProjectValue)}" data-edit-project="1" />
+      </div>`;
+      return;
+    }
+
     html += `
     <button class="nav-item proj-item ${state.project === p.id ? "active" : ""}" data-project="${p.id}">
       <span class="cat-dot" style="background:${projColor(i)}"></span>
       <span class="proj-name" title="${escapeAttr(p.name)}">${escapeHtml(p.name)}</span>
       <span class="proj-pct">${pct}%</span>
-      <span class="proj-del" data-del-project="${p.id}" title="Hapus proyek">🗑</span>
+      <span class="proj-act" data-rename-project="${p.id}" title="Ubah nama proyek">${ICONS.edit}</span>
+      <span class="proj-act proj-del" data-del-project="${p.id}" title="Hapus proyek">${ICONS.trash}</span>
     </button>`;
   });
 
@@ -556,6 +626,14 @@ function renderProjects() {
   }
 
   projectListEl.innerHTML = html;
+
+  if (state.editingProject) {
+    const input = projectListEl.querySelector('[data-edit-project="1"]');
+    if (input && document.activeElement !== input) {
+      input.focus();
+      input.select();
+    }
+  }
 }
 
 function populateTaskProjectSelect() {
