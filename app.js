@@ -79,7 +79,7 @@ function escapeHtml(str) {
 const CATEGORY_LABELS = { kerja: "Kerja", pribadi: "Pribadi", belajar: "Belajar", bug: "Bug" };
 const PRIORITY_LABELS = { high: "Tinggi", medium: "Sedang", low: "Rendah" };
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
-const PROJECT_COLORS = ["#3b5bdb", "#12855a", "#c07807", "#c5322f", "#5b3fd1", "#1d7ec4", "#0f8f9e", "#b45309"];
+const PROJECT_COLORS = ["#0f6e6e", "#16794f", "#8a6208", "#b33a30", "#5b4bb8", "#1d6fa5", "#0d8383", "#a0561f"];
 
 function projColor(i) {
   return PROJECT_COLORS[i % PROJECT_COLORS.length];
@@ -895,12 +895,12 @@ function pdfSafe(str) {
   return clean || "-";
 }
 
-const PDF_NAVY = [43, 52, 80];
-const PDF_ACCENT = [79, 101, 197];
-const PDF_GRAY_BG = [243, 245, 249];
-const PDF_GREEN = [34, 139, 84];
-const PDF_AMBER = [190, 130, 10];
-const PDF_RED = [178, 76, 76];
+const PDF_NAVY = [22, 52, 50];
+const PDF_ACCENT = [15, 110, 110];
+const PDF_GRAY_BG = [241, 246, 245];
+const PDF_GREEN = [22, 121, 79];
+const PDF_AMBER = [138, 98, 8];
+const PDF_RED = [179, 58, 48];
 
 function taskStatusLabel(t) {
   const pct = taskProgress(t);
