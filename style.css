@@ -587,6 +587,8 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
+#bulkCompleteBtn { background: var(--success); color: #ffffff; }
+#bulkCompleteBtn:hover { filter: brightness(0.92); }
 #bulkArchiveBtn { background: var(--accent); color: #ffffff; }
 #bulkArchiveBtn:hover { background: var(--accent-hover); }
 #bulkCancelBtn { background: transparent; color: var(--text-secondary); }

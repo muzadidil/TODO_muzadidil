@@ -184,6 +184,7 @@ const importConfirmBtn = document.getElementById("importConfirmBtn");
 const selectModeBtn = document.getElementById("selectModeBtn");
 const bulkBar = document.getElementById("bulkBar");
 const bulkCount = document.getElementById("bulkCount");
+const bulkCompleteBtn = document.getElementById("bulkCompleteBtn");
 const bulkArchiveBtn = document.getElementById("bulkArchiveBtn");
 const bulkCancelBtn = document.getElementById("bulkCancelBtn");
 
@@ -258,6 +259,25 @@ bulkCancelBtn.addEventListener("click", () => {
   state.selected.clear();
   selectModeBtn.classList.remove("active");
   render();
+});
+
+bulkCompleteBtn.addEventListener("click", async () => {
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  bulkCompleteBtn.disabled = true;
+  try {
+    await Promise.all(
+      ids.map((id) =>
+        updateDoc(doc(db, "tasks", id), { completed: true, completedAt: Date.now() })
+      )
+    );
+  } finally {
+    bulkCompleteBtn.disabled = false;
+    state.selectMode = false;
+    state.selected.clear();
+    selectModeBtn.classList.remove("active");
+    render();
+  }
 });
 
 bulkArchiveBtn.addEventListener("click", async () => {
@@ -678,6 +698,7 @@ function updateBulkBar() {
   bulkBar.style.display = state.selectMode ? "flex" : "none";
   bulkCount.textContent = `${n} dipilih`;
   bulkArchiveBtn.disabled = n === 0;
+  bulkCompleteBtn.disabled = n === 0;
 }
 
 function renderStats() {
