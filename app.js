@@ -164,6 +164,7 @@ const projectAddRow = document.getElementById("projectAddRow");
 const projectNameInput = document.getElementById("projectNameInput");
 const exportPdfBtn = document.getElementById("exportPdfBtn");
 const copyTextBtn = document.getElementById("copyTextBtn");
+const copyWaBtn = document.getElementById("copyWaBtn");
 const exportModalOverlay = document.getElementById("exportModalOverlay");
 const exportModalTitle = document.getElementById("exportModalTitle");
 const exportModalSub = document.getElementById("exportModalSub");
@@ -317,13 +318,19 @@ bulkArchiveBtn.addEventListener("click", async () => {
 
 exportPdfBtn.addEventListener("click", () => openExportModal("pdf"));
 copyTextBtn.addEventListener("click", () => openExportModal("text"));
+copyWaBtn.addEventListener("click", () => openExportModal("wa"));
+
+const EXPORT_MODAL_COPY = {
+  pdf: ["Export Laporan PDF", "Pilih cakupan laporan yang ingin diexport."],
+  text: ["Salin Daftar Tugas sebagai Teks", "Pilih cakupan tugas yang ingin disalin sebagai teks."],
+  wa: ["Salin untuk WhatsApp", "Pilih cakupan tugas yang ingin disalin dengan format WhatsApp."],
+};
 
 function openExportModal(mode) {
   exportMode = mode;
-  exportModalTitle.textContent = mode === "text" ? "Salin Daftar Tugas sebagai Teks" : "Export Laporan PDF";
-  exportModalSub.textContent = mode === "text"
-    ? "Pilih cakupan tugas yang ingin disalin sebagai teks."
-    : "Pilih cakupan laporan yang ingin diexport.";
+  const [title, sub] = EXPORT_MODAL_COPY[mode];
+  exportModalTitle.textContent = title;
+  exportModalSub.textContent = sub;
   exportProjectSelect.innerHTML = projects
     .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`)
     .join("");
@@ -347,24 +354,28 @@ exportModalOverlay.addEventListener("click", (e) => {
 
 exportAllOption.addEventListener("click", () => {
   closeExportModal();
-  if (exportMode === "text") copyTasksAsText("all");
-  else exportPdf("all");
+  runExport("all");
 });
+
+function runExport(target) {
+  if (exportMode === "text") copyTasksAsText(target);
+  else if (exportMode === "wa") copyTasksAsWhatsApp(target);
+  else exportPdf(target);
+}
 
 exportOneOption.addEventListener("click", () => {
   if (!projects.length) {
     alert("Belum ada proyek untuk diexport. Buat proyek terlebih dahulu.");
     return;
   }
-  exportProjectConfirmBtn.textContent = exportMode === "text" ? "Salin" : "Export";
+  exportProjectConfirmBtn.textContent = exportMode === "pdf" ? "Export" : "Salin";
   exportProjectPicker.style.display = "flex";
 });
 
 exportProjectConfirmBtn.addEventListener("click", () => {
   const target = exportProjectSelect.value;
   closeExportModal();
-  if (exportMode === "text") copyTasksAsText(target);
-  else exportPdf(target);
+  runExport(target);
 });
 
 // ---------- Import from text ----------
@@ -608,13 +619,14 @@ async function deleteTask(id) {
 }
 
 async function restoreTask(id) {
-  await updateDoc(doc(db, "tasks", id), { archived: false });
+  // autoArchive:false agar tugas yang sengaja dikembalikan tidak langsung terarsip lagi
+  await updateDoc(doc(db, "tasks", id), { archived: false, autoArchive: false });
 }
 
 async function autoArchiveOldTasks() {
   const now = Date.now();
   for (const t of tasks) {
-    if (!t.completed || t.archived) continue;
+    if (!t.completed || t.archived || t.autoArchive === false) continue;
     if (!t.completedAt) {
       // tugas selesai dari sebelum fitur arsip ada — arsipkan langsung
       await updateDoc(doc(db, "tasks", t.id), { completedAt: now - ARCHIVE_AFTER_MS, archived: true });
@@ -1206,21 +1218,110 @@ function buildTasksText(target) {
   return lines.join("\n");
 }
 
-function flashCopySuccess() {
-  const original = copyTextBtn.textContent;
-  copyTextBtn.textContent = "✅ Tersalin!";
-  copyTextBtn.disabled = true;
+// ---------- Copy for WhatsApp (*tebal*, ~coret~, _miring_) ----------
+function waTaskMeta(t) {
+  const meta = [
+    CATEGORY_LABELS[t.category],
+    PRIORITY_LABELS[t.priority],
+    t.deadline ? `tenggat ${formatDate(t.deadline)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" • ");
+  return meta ? ` _(${meta})_` : "";
+}
+
+function flattenSubtasksForWa(nodes, depth, lines) {
+  (nodes || []).forEach((s) => {
+    const bullet = depth === 0 ? "◦" : "-";
+    const text = s.completed ? `~${s.text}~` : s.text;
+    lines.push("   ".repeat(depth + 1) + `_${bullet} ${text}_`);
+    flattenSubtasksForWa(s.children, depth + 1, lines);
+  });
+}
+
+function appendTaskGroupWa(list, lines) {
+  const belum = list.filter((t) => !t.completed);
+  const selesai = list.filter((t) => t.completed);
+
+  lines.push(`*BELUM SELESAI (${belum.length})*`);
+  if (!belum.length) {
+    lines.push("_(tidak ada)_");
+  } else {
+    belum.forEach((t, i) => {
+      lines.push(`${i + 1}. ${t.text}${waTaskMeta(t)}`);
+      flattenSubtasksForWa(t.subtasks, 0, lines);
+    });
+  }
+  lines.push("");
+  lines.push(`*SELESAI (${selesai.length})*`);
+  if (!selesai.length) {
+    lines.push("_(tidak ada)_");
+  } else {
+    selesai.forEach((t, i) => {
+      lines.push(`${i + 1}. ~${t.text}~${waTaskMeta(t)}`);
+      flattenSubtasksForWa(t.subtasks, 0, lines);
+    });
+  }
+}
+
+function buildWhatsAppText(target) {
+  const isAll = target === "all";
+  const proj = projects.find((p) => p.id === target);
+  const projName = isAll ? "Semua Proyek" : proj ? proj.name : "Tanpa Proyek";
+  const scoped = isAll
+    ? tasks.filter((t) => !t.archived)
+    : tasks.filter((t) => !t.archived && (t.projectId || "") === target);
+  const todayLabel = new Date().toLocaleDateString("id-ID", {
+    day: "numeric", month: "long", year: "numeric",
+  });
+
+  const lines = [];
+  lines.push(`*LAPORAN TUGAS — ${projName.toUpperCase()}*`);
+  lines.push(`_${todayLabel} • progres ${meanProgress(scoped)}%_`);
+  lines.push("");
+
+  if (!scoped.length) {
+    lines.push("_Belum ada tugas._");
+    return lines.join("\n");
+  }
+
+  if (isAll) {
+    const groups = projects.map((p) => ({
+      name: p.name,
+      list: scoped.filter((t) => t.projectId === p.id),
+    }));
+    const noProj = scoped.filter((t) => !projects.some((p) => p.id === t.projectId));
+    if (noProj.length) groups.push({ name: "Tanpa Proyek", list: noProj });
+
+    let first = true;
+    groups.forEach((g) => {
+      if (!g.list.length) return;
+      if (!first) lines.push("");
+      first = false;
+      lines.push(`*${g.name.toUpperCase()} — ${meanProgress(g.list)}%*`);
+      appendTaskGroupWa(g.list, lines);
+    });
+  } else {
+    appendTaskGroupWa(scoped, lines);
+  }
+
+  return lines.join("\n");
+}
+
+function flashCopySuccess(btn) {
+  const original = btn.textContent;
+  btn.textContent = "✅ Tersalin!";
+  btn.disabled = true;
   setTimeout(() => {
-    copyTextBtn.textContent = original;
-    copyTextBtn.disabled = false;
+    btn.textContent = original;
+    btn.disabled = false;
   }, 1500);
 }
 
-async function copyTasksAsText(target) {
-  const text = buildTasksText(target);
+async function copyToClipboard(text, btn) {
   try {
     await navigator.clipboard.writeText(text);
-    flashCopySuccess();
+    flashCopySuccess(btn);
     return;
   } catch (err) {
     // Clipboard API unavailable (non-secure context / older browser) — fall back.
@@ -1233,11 +1334,19 @@ async function copyTasksAsText(target) {
   ta.select();
   try {
     document.execCommand("copy");
-    flashCopySuccess();
+    flashCopySuccess(btn);
   } catch (e) {
     alert("Gagal menyalin otomatis. Berikut teksnya:\n\n" + text);
   }
   document.body.removeChild(ta);
+}
+
+function copyTasksAsText(target) {
+  return copyToClipboard(buildTasksText(target), copyTextBtn);
+}
+
+function copyTasksAsWhatsApp(target) {
+  return copyToClipboard(buildWhatsAppText(target), copyWaBtn);
 }
 
 // ---------- Init ----------
