@@ -24,6 +24,17 @@ let state = {
   subAddOpen: new Set(),  // "taskId:subId" with nested add-row open
   selectMode: false,      // manual multi-select mode for bulk archive
   selected: new Set(),    // task ids selected in selectMode
+  editing: null,          // { taskId } atau { taskId, subId } yang teksnya sedang diedit
+  editValue: "",          // nilai input edit, disimpan agar tidak hilang saat re-render
+};
+
+const ICONS = {
+  edit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
+  chevron: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+  restore: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
 };
 
 function uid() {
@@ -100,6 +111,14 @@ function toggleNodeInTree(nodes, subId) {
     n.id === subId
       ? { ...n, completed: !n.completed }
       : { ...n, children: toggleNodeInTree(n.children || [], subId) }
+  );
+}
+
+function setNodeTextInTree(nodes, subId, text) {
+  return nodes.map((n) =>
+    n.id === subId
+      ? { ...n, text }
+      : { ...n, children: setNodeTextInTree(n.children || [], subId, text) }
   );
 }
 
@@ -636,6 +655,66 @@ async function autoArchiveOldTasks() {
   }
 }
 
+function startEdit(taskId, subId) {
+  const t = tasks.find((t) => t.id === taskId);
+  if (!t) return;
+  let current = t.text;
+  if (subId) {
+    const node = findNodeInTree(t.subtasks || [], subId);
+    if (!node) return;
+    current = node.text;
+    state.expanded.add(taskId);
+  }
+  state.editing = subId ? { taskId, subId } : { taskId };
+  state.editValue = current;
+  render();
+}
+
+function findNodeInTree(nodes, subId) {
+  for (const n of nodes) {
+    if (n.id === subId) return n;
+    const found = findNodeInTree(n.children || [], subId);
+    if (found) return found;
+  }
+  return null;
+}
+
+function cancelEdit() {
+  state.editing = null;
+  state.editValue = "";
+  render();
+}
+
+async function saveEdit() {
+  const edit = state.editing;
+  if (!edit) return;
+  const text = state.editValue.trim();
+  const t = tasks.find((t) => t.id === edit.taskId);
+
+  // dibersihkan lebih dulu supaya blur setelah re-render tidak menyimpan dua kali
+  state.editing = null;
+  state.editValue = "";
+
+  if (!t || !text) {
+    render();
+    return;
+  }
+
+  if (edit.subId) {
+    const node = findNodeInTree(t.subtasks || [], edit.subId);
+    if (node && node.text !== text) {
+      await updateDoc(doc(db, "tasks", t.id), {
+        subtasks: setNodeTextInTree(t.subtasks || [], edit.subId, text),
+      });
+      return;
+    }
+  } else if (t.text !== text) {
+    await updateDoc(doc(db, "tasks", t.id), { text });
+    return;
+  }
+  render();
+}
+
 function toggleExpand(id) {
   if (state.expanded.has(id)) state.expanded.delete(id);
   else state.expanded.add(id);
@@ -727,7 +806,7 @@ function updateBulkBar() {
   const visibleIds = getFilteredTasks().map((t) => t.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => state.selected.has(id));
   selectAllCheckbox.classList.toggle("checked", allSelected);
-  selectAllCheckbox.textContent = allSelected ? "✓" : "";
+  selectAllCheckbox.innerHTML = allSelected ? ICONS.check : "";
 }
 
 function renderStats() {
@@ -750,13 +829,18 @@ function renderSubtree(taskId, nodes, depth) {
   let html = "";
   (nodes || []).forEach((s) => {
     const addKey = taskId + ":" + s.id;
+    const isEditing =
+      state.editing && state.editing.taskId === taskId && state.editing.subId === s.id;
     html += `
       <div class="subtask-item" style="margin-left:${depth * 22}px">
-        <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? "✓" : ""}</button>
-        <span class="subtask-text ${s.completed ? "done" : ""}">${escapeHtml(s.text)}</span>
+        <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? ICONS.check : ""}</button>
+        ${isEditing
+          ? `<input class="task-edit-input sub" type="text" value="${escapeAttr(state.editValue)}" data-edit="1" />`
+          : `<span class="subtask-text ${s.completed ? "done" : ""}">${escapeHtml(s.text)}</span>`}
         ${s.link ? `<a class="link-badge" href="${escapeAttr(s.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
-        <button class="task-action-btn addsub ${state.subAddOpen.has(addKey) ? "open" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="add-sub-toggle" title="Tambah sub-tugas di dalamnya">+</button>
-        <button class="task-action-btn delete" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="delete-sub">🗑</button>
+        <button class="task-action-btn edit" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="edit-sub" title="Ubah teks">${ICONS.edit}</button>
+        <button class="task-action-btn addsub ${state.subAddOpen.has(addKey) ? "open" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="add-sub-toggle" title="Tambah sub-tugas di dalamnya">${ICONS.plus}</button>
+        <button class="task-action-btn delete" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="delete-sub" title="Hapus">${ICONS.trash}</button>
       </div>`;
     if (state.subAddOpen.has(addKey)) {
       html += renderSubAddRow(taskId, s.id, depth + 1);
@@ -796,14 +880,17 @@ function renderTasks() {
     wrap.className = "task-wrap";
 
     const isSelected = state.selected.has(t.id);
+    const isEditing = state.editing && state.editing.taskId === t.id && !state.editing.subId;
     const item = document.createElement("div");
     item.className = "task-item" + (t.completed ? " completed" : "") + (isSelected ? " selected" : "");
 
     item.innerHTML = `
-      ${state.selectMode ? `<button class="select-checkbox ${isSelected ? "checked" : ""}" data-id="${t.id}" data-action="select">${isSelected ? "✓" : ""}</button>` : ""}
-      <button class="task-checkbox ${t.completed ? "checked" : ""}" data-id="${t.id}" data-action="toggle">${t.completed ? "✓" : ""}</button>
+      ${state.selectMode ? `<button class="select-checkbox ${isSelected ? "checked" : ""}" data-id="${t.id}" data-action="select">${isSelected ? ICONS.check : ""}</button>` : ""}
+      <button class="task-checkbox ${t.completed ? "checked" : ""}" data-id="${t.id}" data-action="toggle">${t.completed ? ICONS.check : ""}</button>
       <div class="task-body">
-        <div class="task-text"></div>
+        ${isEditing
+          ? `<input class="task-edit-input" type="text" value="${escapeAttr(state.editValue)}" data-edit="1" />`
+          : `<div class="task-text"></div>`}
         <div class="task-meta">
           ${proj && state.project === "all" ? `<span class="task-badge badge-project">📁 ${escapeHtml(proj.name)}</span>` : ""}
           <span class="task-badge badge-${t.category}">${CATEGORY_LABELS[t.category]}</span>
@@ -821,14 +908,15 @@ function renderTasks() {
         </div>
       </div>
       <div class="task-actions">
+        <button class="task-action-btn edit" data-id="${t.id}" data-action="edit" title="Ubah teks tugas">${ICONS.edit}</button>
         ${state.navFilter === "archived"
-          ? `<button class="task-action-btn restore" data-id="${t.id}" data-action="restore" title="Kembalikan dari arsip">↩</button>`
-          : `<button class="task-action-btn expand ${isExpanded ? "open" : ""}" data-id="${t.id}" data-action="expand">▾</button>`}
-        <button class="task-action-btn delete" data-id="${t.id}" data-action="delete">🗑</button>
+          ? `<button class="task-action-btn restore" data-id="${t.id}" data-action="restore" title="Kembalikan dari arsip">${ICONS.restore}</button>`
+          : `<button class="task-action-btn expand ${isExpanded ? "open" : ""}" data-id="${t.id}" data-action="expand" title="Sub-tugas">${ICONS.chevron}</button>`}
+        <button class="task-action-btn delete" data-id="${t.id}" data-action="delete" title="Hapus">${ICONS.trash}</button>
       </div>
     `;
 
-    item.querySelector(".task-text").textContent = t.text;
+    if (!isEditing) item.querySelector(".task-text").textContent = t.text;
     wrap.appendChild(item);
 
     if (isExpanded) {
@@ -840,6 +928,14 @@ function renderTasks() {
 
     taskListEl.appendChild(wrap);
   });
+
+  if (state.editing) {
+    const input = taskListEl.querySelector('[data-edit="1"]');
+    if (input && document.activeElement !== input) {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+  }
 }
 
 taskListEl.addEventListener("click", (e) => {
@@ -851,6 +947,14 @@ taskListEl.addEventListener("click", (e) => {
     if (state.selected.has(id)) state.selected.delete(id);
     else state.selected.add(id);
     render();
+    return;
+  }
+  if (action === "edit") {
+    startEdit(btn.dataset.id, null);
+    return;
+  }
+  if (action === "edit-sub") {
+    startEdit(btn.dataset.taskId, btn.dataset.subId);
     return;
   }
   if (action === "toggle") toggleTask(btn.dataset.id);
@@ -886,7 +990,28 @@ taskListEl.addEventListener("click", (e) => {
   if (!showing) linkInput.focus();
 });
 
+taskListEl.addEventListener("input", (e) => {
+  if (e.target.dataset.edit) state.editValue = e.target.value;
+});
+
+// klik di luar input dianggap simpan, supaya hasil ketikan tidak hilang tanpa sebab
+taskListEl.addEventListener("focusout", (e) => {
+  if (e.target.dataset.edit && state.editing) {
+    state.editValue = e.target.value;
+    saveEdit();
+  }
+});
+
 taskListEl.addEventListener("keydown", (e) => {
+  if (e.target.dataset.edit) {
+    if (e.key === "Enter") {
+      state.editValue = e.target.value;
+      saveEdit();
+    } else if (e.key === "Escape") {
+      cancelEdit();
+    }
+    return;
+  }
   if (e.key === "Enter" && e.target.classList.contains("subtask-input")) {
     const taskId = e.target.dataset.taskId;
     const parentId = e.target.dataset.parentId || "";

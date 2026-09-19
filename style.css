@@ -712,7 +712,30 @@ body {
   transition: all 0.15s;
 }
 
+.task-action-btn svg { width: 15px; height: 15px; }
+.subtask-item .task-action-btn svg { width: 13px; height: 13px; }
+.task-checkbox svg { width: 13px; height: 13px; }
+.subtask-checkbox svg { width: 11px; height: 11px; }
+.select-checkbox svg { width: 12px; height: 12px; }
+
+.task-edit-input {
+  flex: 1;
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  color: var(--text-primary);
+  padding: 6px 9px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.task-edit-input.sub { font-size: 13px; font-weight: 400; padding: 4px 8px; }
+
 .task-action-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.task-action-btn.edit:hover { background: var(--accent-soft); color: var(--accent-hover); }
 .task-action-btn.delete:hover { background: var(--danger-soft); color: var(--danger); }
 .task-action-btn.expand { transition: transform 0.15s, background 0.15s, color 0.15s; }
 .task-action-btn.expand.open { transform: rotate(180deg); color: var(--accent-hover); }
