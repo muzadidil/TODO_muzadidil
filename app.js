@@ -10,9 +10,12 @@ import {
 
 const tasksCollection = collection(db, "tasks");
 const projectsCollection = collection(db, "projects");
+const mastersCollection = collection(db, "masters");
 
 let tasks = [];
 let projects = [];
+let masters = [];
+let mastersError = null;
 let state = {
   project: "all",         // all | <projectId> | "" (tanpa proyek)
   navFilter: "all",       // all | today | active | completed | overdue
@@ -28,6 +31,9 @@ let state = {
   editDraft: {},          // isian form edit, disimpan agar tidak hilang saat re-render
   editingProject: null,   // id proyek yang namanya sedang diubah
   editProjectValue: "",
+  descEditing: null,      // "taskId" atau "taskId:subId" yang deskripsinya sedang ditulis
+  descDraft: "",
+  descExpanded: new Set(), // deskripsi panjang yang sedang dibuka penuh
 };
 
 const ICONS = {
@@ -37,6 +43,9 @@ const ICONS = {
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
   restore: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M4 9h11a5 5 0 0 1 0 10h-5"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+  note: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>`,
+  up: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>`,
+  down: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`,
 };
 
 function uid() {
@@ -89,6 +98,36 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
+// ---------- Harga (Rupiah) ----------
+function parsePrice(value) {
+  const n = Number(String(value ?? "").replace(/\D/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatNumber(n) {
+  return n ? Math.round(n).toLocaleString("id-ID") : "";
+}
+
+function formatRupiah(n) {
+  return "Rp " + Math.round(n || 0).toLocaleString("id-ID");
+}
+
+function sumPrices(nodes) {
+  return (nodes || []).reduce((sum, n) => sum + nodePrice(n), 0);
+}
+
+// Bila rincian di bawahnya diberi harga, harga induk = jumlah rincian (harga induk sendiri diabaikan)
+// supaya tidak terhitung dobel.
+function nodePrice(n) {
+  const fromChildren = sumPrices(n.children);
+  return fromChildren > 0 ? fromChildren : Number(n.price) || 0;
+}
+
+function taskPrice(t) {
+  const fromChildren = sumPrices(t.subtasks);
+  return fromChildren > 0 ? fromChildren : Number(t.price) || 0;
+}
+
 const CATEGORY_LABELS = { kerja: "Kerja", pribadi: "Pribadi", belajar: "Belajar", bug: "Bug" };
 const PRIORITY_LABELS = { high: "Tinggi", medium: "Sedang", low: "Rendah" };
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 };
@@ -116,11 +155,11 @@ function toggleNodeInTree(nodes, subId) {
   );
 }
 
-function setNodeTextInTree(nodes, subId, text) {
+function patchNodeInTree(nodes, subId, patch) {
   return nodes.map((n) =>
     n.id === subId
-      ? { ...n, text }
-      : { ...n, children: setNodeTextInTree(n.children || [], subId, text) }
+      ? { ...n, ...patch }
+      : { ...n, children: patchNodeInTree(n.children || [], subId, patch) }
   );
 }
 
@@ -159,6 +198,13 @@ function projectScopedTasks(list) {
   const base = list || tasks.filter((t) => !t.archived);
   if (state.project === "all") return base;
   return base.filter((t) => (t.projectId || "") === state.project);
+}
+
+// Tugas untuk laporan klien: yang terarsip otomatis karena selesai tetap ikut (tampil dicoret),
+// sedangkan yang diarsipkan manual sebelum selesai dianggap batal.
+function reportTasks(target) {
+  const base = tasks.filter((t) => !t.archived || t.completed);
+  return target === "all" ? base : base.filter((t) => (t.projectId || "") === target);
 }
 
 // ---------- DOM refs ----------
@@ -210,8 +256,37 @@ const bulkCount = document.getElementById("bulkCount");
 const bulkCompleteBtn = document.getElementById("bulkCompleteBtn");
 const bulkArchiveBtn = document.getElementById("bulkArchiveBtn");
 const bulkCancelBtn = document.getElementById("bulkCancelBtn");
+const waOptions = document.getElementById("waOptions");
+const waIncludePrice = document.getElementById("waIncludePrice");
+const waIncludeDesc = document.getElementById("waIncludeDesc");
+const masterBtn = document.getElementById("masterBtn");
+const masterModalOverlay = document.getElementById("masterModalOverlay");
+const masterModalBody = document.getElementById("masterModalBody");
+const masterModalClose = document.getElementById("masterModalClose");
 
-let exportMode = "pdf"; // "pdf" | "text"
+let exportMode = "pdf"; // "pdf" | "text" | "wa"
+
+const SORT_STORAGE_KEY = "taskflow_sort";
+
+function setSort(value) {
+  state.sort = value;
+  sortSelect.value = value;
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, value);
+  } catch (e) {
+    // penyimpanan browser diblokir — urutan cukup berlaku untuk sesi ini
+  }
+}
+
+try {
+  const savedSort = localStorage.getItem(SORT_STORAGE_KEY);
+  if (savedSort && [...sortSelect.options].some((o) => o.value === savedSort)) {
+    state.sort = savedSort;
+    sortSelect.value = savedSort;
+  }
+} catch (e) {
+  // penyimpanan browser diblokir — pakai urutan bawaan
+}
 
 // ---------- Event bindings ----------
 addTaskBtn.addEventListener("click", addTask);
@@ -239,7 +314,7 @@ searchInput.addEventListener("input", (e) => {
 });
 
 sortSelect.addEventListener("change", (e) => {
-  state.sort = e.target.value;
+  setSort(e.target.value);
   render();
 });
 
@@ -344,7 +419,7 @@ copyWaBtn.addEventListener("click", () => openExportModal("wa"));
 const EXPORT_MODAL_COPY = {
   pdf: ["Export Laporan PDF", "Pilih cakupan laporan yang ingin diexport."],
   text: ["Salin Daftar Tugas sebagai Teks", "Pilih cakupan tugas yang ingin disalin sebagai teks."],
-  wa: ["Salin untuk WhatsApp", "Pilih cakupan tugas yang ingin disalin dengan format WhatsApp."],
+  wa: ["Salin Laporan untuk WhatsApp", "Format resmi untuk klien: judul & tahapan tebal, pekerjaan selesai dicoret, istilah asing miring."],
 };
 
 function openExportModal(mode) {
@@ -352,6 +427,9 @@ function openExportModal(mode) {
   const [title, sub] = EXPORT_MODAL_COPY[mode];
   exportModalTitle.textContent = title;
   exportModalSub.textContent = sub;
+  waOptions.style.display = mode === "wa" ? "flex" : "none";
+  waIncludePrice.checked = false;
+  waIncludeDesc.checked = false;
   exportProjectSelect.innerHTML = projects
     .map((p) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`)
     .join("");
@@ -664,6 +742,8 @@ function updateViewTitle() {
     title = state.navFilter === "all" ? pname : `${pname} — ${map[state.navFilter][0]}`;
     const scoped = projectScopedTasks();
     subtitle = `Proyek • ${scoped.length} tugas • ${meanProgress(scoped)}% progres`;
+    const total = reportTasks(state.project).reduce((sum, t) => sum + taskPrice(t), 0);
+    if (total) subtitle += ` • Nilai ${formatRupiah(total)}`;
   }
 
   viewTitle.textContent = title;
@@ -744,7 +824,7 @@ function startEdit(taskId, subId) {
     if (!node) return;
     state.expanded.add(taskId);
     state.editing = { taskId, subId };
-    state.editDraft = { text: node.text };
+    state.editDraft = { text: node.text, price: formatNumber(Number(node.price) || 0) };
   } else {
     state.editing = { taskId };
     state.editDraft = {
@@ -754,6 +834,7 @@ function startEdit(taskId, subId) {
       priority: t.priority,
       deadline: t.deadline || "",
       link: t.link || "",
+      price: formatNumber(Number(t.price) || 0),
     };
   }
   render();
@@ -790,11 +871,16 @@ async function saveEdit() {
     return;
   }
 
+  const price = parsePrice(draft.price);
+
   if (edit.subId) {
     const node = findNodeInTree(t.subtasks || [], edit.subId);
-    if (node && node.text !== text) {
+    const subPatch = {};
+    if (node && node.text !== text) subPatch.text = text;
+    if (node && (Number(node.price) || 0) !== price) subPatch.price = price;
+    if (Object.keys(subPatch).length) {
       await updateDoc(doc(db, "tasks", t.id), {
-        subtasks: setNodeTextInTree(t.subtasks || [], edit.subId, text),
+        subtasks: patchNodeInTree(t.subtasks || [], edit.subId, subPatch),
       });
       return;
     }
@@ -808,9 +894,55 @@ async function saveEdit() {
     const next = (draft[field] || "").trim();
     if ((t[field] || "") !== next) patch[field] = next;
   }
+  if ((Number(t.price) || 0) !== price) patch.price = price;
 
   if (Object.keys(patch).length) {
     await updateDoc(doc(db, "tasks", t.id), patch);
+    return;
+  }
+  render();
+}
+
+async function startDesc(taskId, subId) {
+  const key = subId ? `${taskId}:${subId}` : taskId;
+  const wasOpen = state.descEditing;
+  // Tutup editor yang sedang terbuka dengan menyimpannya, agar tulisan panjang tidak hilang.
+  if (wasOpen) await saveDesc();
+  if (wasOpen === key) return;
+
+  const t = tasks.find((t) => t.id === taskId);
+  const node = t && (subId ? findNodeInTree(t.subtasks || [], subId) : t);
+  if (!node) return;
+  state.descEditing = key;
+  state.descDraft = node.description || "";
+  render();
+}
+
+function cancelDesc() {
+  state.descEditing = null;
+  state.descDraft = "";
+  render();
+}
+
+async function saveDesc() {
+  const key = state.descEditing;
+  if (!key) return;
+  const description = state.descDraft.trim();
+  state.descEditing = null;
+  state.descDraft = "";
+
+  const [taskId, subId] = key.split(":");
+  const t = tasks.find((t) => t.id === taskId);
+  if (t && subId) {
+    const node = findNodeInTree(t.subtasks || [], subId);
+    if (node && (node.description || "") !== description) {
+      await updateDoc(doc(db, "tasks", taskId), {
+        subtasks: patchNodeInTree(t.subtasks || [], subId, { description }),
+      });
+      return;
+    }
+  } else if (t && (t.description || "") !== description) {
+    await updateDoc(doc(db, "tasks", taskId), { description });
     return;
   }
   render();
@@ -861,7 +993,9 @@ function getFilteredTasks() {
   if (state.priority !== "all") list = list.filter((t) => t.priority === state.priority);
 
   if (state.search) {
-    list = list.filter((t) => t.text.toLowerCase().includes(state.search));
+    list = list.filter((t) =>
+      `${t.text} ${t.description || ""}`.toLowerCase().includes(state.search)
+    );
   }
 
   switch (state.sort) {
@@ -926,23 +1060,65 @@ function renderStats() {
   document.getElementById("sidebarProgressText").textContent = progress + "% selesai";
 }
 
+function priceInputHtml(autoPrice, value) {
+  if (autoPrice) {
+    return `<input type="text" class="price-input" value="${formatNumber(autoPrice)}" title="Otomatis: jumlah harga rincian di bawahnya" disabled />`;
+  }
+  return `<input type="text" class="price-input" inputmode="numeric" data-edit-field="price" value="${escapeAttr(value || "")}" placeholder="Harga (Rp)" title="Harga (Rp)" />`;
+}
+
+function renderDescBlock(key, description, marginLeft) {
+  const style = marginLeft ? ` style="margin-left:${marginLeft}px"` : "";
+  if (state.descEditing === key) {
+    return `
+      <div class="desc-editor"${style}>
+        <textarea data-desc="1" rows="4" placeholder="Tulis deskripsi / penjelasan pekerjaan...">${escapeHtml(state.descDraft)}</textarea>
+        <div class="desc-editor-actions">
+          <span class="desc-hint">Ctrl+Enter untuk simpan, Esc untuk batal</span>
+          <button type="button" class="edit-cancel-btn" data-action="desc-cancel">Batal</button>
+          <button type="button" class="edit-save-btn" data-action="desc-save">${ICONS.check}<span>Simpan</span></button>
+        </div>
+      </div>`;
+  }
+  if (!description) return "";
+  const long = description.length > 220 || description.split("\n").length > 3;
+  if (!long) return `<div class="item-desc"${style}>${escapeHtml(description)}</div>`;
+  const expanded = state.descExpanded.has(key);
+  return `<div class="item-desc long ${expanded ? "" : "clamped"}"${style} data-action="desc-expand" data-key="${escapeAttr(key)}" title="${expanded ? "Klik untuk meringkas" : "Klik untuk melihat selengkapnya"}">${escapeHtml(description)}</div>`;
+}
+
+function renderSubEditForm(s) {
+  return `
+    <div class="subtask-edit">
+      <input class="task-edit-input sub" type="text" value="${escapeAttr(state.editDraft.text || "")}" data-edit="1" placeholder="Teks sub-tugas" />
+      ${priceInputHtml(sumPrices(s.children), state.editDraft.price)}
+      <button type="button" class="edit-cancel-btn sm" data-action="edit-cancel">Batal</button>
+      <button type="button" class="edit-save-btn sm" data-action="edit-save">${ICONS.check}<span>Simpan</span></button>
+    </div>`;
+}
+
 function renderSubtree(taskId, nodes, depth) {
   let html = "";
   (nodes || []).forEach((s) => {
     const addKey = taskId + ":" + s.id;
+    const indent = depth * 22;
     const isEditing =
       state.editing && state.editing.taskId === taskId && state.editing.subId === s.id;
+    const price = nodePrice(s);
     html += `
-      <div class="subtask-item" style="margin-left:${depth * 22}px">
+      <div class="subtask-item" style="margin-left:${indent}px">
         <button class="subtask-checkbox ${s.completed ? "checked" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="toggle-sub">${s.completed ? ICONS.check : ""}</button>
         ${isEditing
-          ? `<input class="task-edit-input sub" type="text" value="${escapeAttr(state.editDraft.text || "")}" data-edit="1" />`
-          : `<span class="subtask-text ${s.completed ? "done" : ""}">${escapeHtml(s.text)}</span>`}
+          ? renderSubEditForm(s)
+          : `<span class="subtask-text ${s.completed ? "done" : ""}">${escapeHtml(s.text)}</span>
+        ${price ? `<span class="price-badge sub"${sumPrices(s.children) ? ` title="Jumlah dari harga rincian"` : ""}>${formatRupiah(price)}</span>` : ""}
         ${s.link ? `<a class="link-badge" href="${escapeAttr(s.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
-        <button class="task-action-btn edit" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="edit-sub" title="Ubah teks">${ICONS.edit}</button>
+        <button class="task-action-btn desc ${s.description ? "has" : ""} ${state.descEditing === addKey ? "open" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="desc-sub" title="${s.description ? "Ubah deskripsi" : "Tambah deskripsi"}">${ICONS.note}</button>
+        <button class="task-action-btn edit" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="edit-sub" title="Ubah teks & harga">${ICONS.edit}</button>
         <button class="task-action-btn addsub ${state.subAddOpen.has(addKey) ? "open" : ""}" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="add-sub-toggle" title="Tambah sub-tugas di dalamnya">${ICONS.plus}</button>
-        <button class="task-action-btn delete" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="delete-sub" title="Hapus">${ICONS.trash}</button>
+        <button class="task-action-btn delete" data-task-id="${taskId}" data-sub-id="${s.id}" data-action="delete-sub" title="Hapus">${ICONS.trash}</button>`}
       </div>`;
+    html += renderDescBlock(addKey, s.description, indent + 26);
     if (state.subAddOpen.has(addKey)) {
       html += renderSubAddRow(taskId, s.id, depth + 1);
     }
@@ -969,7 +1145,7 @@ function optionsHtml(items, selected) {
     .join("");
 }
 
-function renderTaskEditForm() {
+function renderTaskEditForm(t) {
   const d = state.editDraft;
   const projectOptions = [["", "Tanpa Proyek"], ...projects.map((p) => [p.id, p.name])];
   const categoryOptions = Object.entries(CATEGORY_LABELS);
@@ -983,6 +1159,7 @@ function renderTaskEditForm() {
         <select data-edit-field="category" title="Kategori">${optionsHtml(categoryOptions, d.category)}</select>
         <select data-edit-field="priority" title="Prioritas">${optionsHtml(priorityOptions, d.priority)}</select>
         <input type="date" data-edit-field="deadline" value="${escapeAttr(d.deadline || "")}" title="Deadline" />
+        ${priceInputHtml(sumPrices(t.subtasks), d.price)}
         <input type="url" data-edit-field="link" value="${escapeAttr(d.link || "")}" placeholder="https://..." title="Link" />
         <div class="task-edit-actions">
           <button type="button" class="edit-save-btn" data-action="edit-save">${ICONS.check}<span>Simpan</span></button>
@@ -1007,6 +1184,7 @@ function renderTasks() {
     const { total: subTotal, done: subDone } = countTree(subtasks);
     const isExpanded = state.expanded.has(t.id);
     const pct = taskProgress(t);
+    const price = taskPrice(t);
     const proj = projects.find((p) => p.id === t.projectId);
 
     const wrap = document.createElement("div");
@@ -1021,7 +1199,8 @@ function renderTasks() {
       ${state.selectMode ? `<button class="select-checkbox ${isSelected ? "checked" : ""}" data-id="${t.id}" data-action="select">${isSelected ? ICONS.check : ""}</button>` : ""}
       <button class="task-checkbox ${t.completed ? "checked" : ""}" data-id="${t.id}" data-action="toggle">${t.completed ? ICONS.check : ""}</button>
       <div class="task-body">
-        ${isEditing ? renderTaskEditForm() : `<div class="task-text"></div>`}
+        ${isEditing ? renderTaskEditForm(t) : `<div class="task-text"></div>`}
+        ${renderDescBlock(t.id, t.description, 0)}
         <div class="task-meta">
           ${proj && state.project === "all" ? `<span class="task-badge badge-project">📁 ${escapeHtml(proj.name)}</span>` : ""}
           <span class="task-badge badge-${t.category}">${CATEGORY_LABELS[t.category]}</span>
@@ -1030,6 +1209,7 @@ function renderTasks() {
           </span>
           ${t.dueDate ? `<span class="task-date">📅 ${formatDateTime(t.createdAt)}</span>` : ""}
           ${subTotal ? `<span class="task-date">${subDone}/${subTotal} sub-tugas</span>` : ""}
+          ${price ? `<span class="price-badge"${sumPrices(subtasks) ? ` title="Jumlah dari harga rincian"` : ""}>💰 ${formatRupiah(price)}</span>` : ""}
           ${t.link ? `<a class="link-badge" href="${escapeAttr(t.link)}" target="_blank" rel="noopener noreferrer">🔗 Link</a>` : ""}
           ${t.deadline ? `<span class="deadline-badge deadline-${deadlineStatus(t.deadline)}">⏰ ${formatDate(t.deadline)}</span>` : ""}
         </div>
@@ -1039,7 +1219,8 @@ function renderTasks() {
         </div>
       </div>
       <div class="task-actions">
-        <button class="task-action-btn edit" data-id="${t.id}" data-action="edit" title="Ubah teks tugas">${ICONS.edit}</button>
+        <button class="task-action-btn desc ${t.description ? "has" : ""} ${state.descEditing === t.id ? "open" : ""}" data-id="${t.id}" data-action="desc" title="${t.description ? "Ubah deskripsi" : "Tambah deskripsi"}">${ICONS.note}</button>
+        <button class="task-action-btn edit" data-id="${t.id}" data-action="edit" title="Ubah tugas & harga">${ICONS.edit}</button>
         ${state.navFilter === "archived"
           ? `<button class="task-action-btn restore" data-id="${t.id}" data-action="restore" title="Kembalikan dari arsip">${ICONS.restore}</button>`
           : `<button class="task-action-btn expand ${isExpanded ? "open" : ""}" data-id="${t.id}" data-action="expand" title="Sub-tugas">${ICONS.chevron}</button>`}
@@ -1060,12 +1241,14 @@ function renderTasks() {
     taskListEl.appendChild(wrap);
   });
 
-  if (state.editing) {
-    const input = taskListEl.querySelector('[data-edit="1"]');
-    if (input && document.activeElement !== input) {
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    }
+  const focusTarget = state.editing
+    ? taskListEl.querySelector('[data-edit="1"]')
+    : state.descEditing
+      ? taskListEl.querySelector('[data-desc="1"]')
+      : null;
+  if (focusTarget && document.activeElement !== focusTarget) {
+    focusTarget.focus();
+    focusTarget.setSelectionRange(focusTarget.value.length, focusTarget.value.length);
   }
 }
 
@@ -1094,6 +1277,29 @@ taskListEl.addEventListener("click", (e) => {
   }
   if (action === "edit-sub") {
     startEdit(btn.dataset.taskId, btn.dataset.subId);
+    return;
+  }
+  if (action === "desc") {
+    startDesc(btn.dataset.id, null);
+    return;
+  }
+  if (action === "desc-sub") {
+    startDesc(btn.dataset.taskId, btn.dataset.subId);
+    return;
+  }
+  if (action === "desc-save") {
+    saveDesc();
+    return;
+  }
+  if (action === "desc-cancel") {
+    cancelDesc();
+    return;
+  }
+  if (action === "desc-expand") {
+    const key = btn.dataset.key;
+    if (state.descExpanded.has(key)) state.descExpanded.delete(key);
+    else state.descExpanded.add(key);
+    render();
     return;
   }
   if (action === "toggle") toggleTask(btn.dataset.id);
@@ -1130,24 +1336,45 @@ taskListEl.addEventListener("click", (e) => {
 });
 
 taskListEl.addEventListener("input", (e) => {
-  if (e.target.dataset.edit) state.editDraft.text = e.target.value;
+  const { edit, editField, desc } = e.target.dataset;
+  if (edit) state.editDraft.text = e.target.value;
+  else if (editField) state.editDraft[editField] = e.target.value;
+  else if (desc) state.descDraft = e.target.value;
 });
 
 taskListEl.addEventListener("change", (e) => {
   const field = e.target.dataset.editField;
-  if (field) state.editDraft[field] = e.target.value;
+  if (!field) return;
+  if (field === "price") e.target.value = formatNumber(parsePrice(e.target.value));
+  state.editDraft[field] = e.target.value;
 });
 
-// Sub-tugas hanya berisi teks, jadi klik ke luar aman dianggap simpan. Form tugas
-// tidak begitu: berpindah antar dropdown akan ikut menutup form.
+// Form sub-tugas tersimpan saat fokus keluar dari form — tapi tidak saat berpindah
+// dari isian teks ke isian harga di dalam form yang sama.
 taskListEl.addEventListener("focusout", (e) => {
-  if (e.target.dataset.edit && state.editing && state.editing.subId) {
-    state.editDraft.text = e.target.value;
-    saveEdit();
-  }
+  if (!state.editing || !state.editing.subId) return;
+  const form = e.target.closest(".subtask-edit");
+  if (!form || (e.relatedTarget && form.contains(e.relatedTarget))) return;
+  saveEdit();
+});
+
+// Tombol Simpan/Batal tidak boleh mengambil fokus, supaya focusout di atas tidak
+// menyimpan lebih dulu sebelum klik "Batal" sempat diproses (Safari tidak memberi relatedTarget).
+taskListEl.addEventListener("mousedown", (e) => {
+  if (e.target.closest(".subtask-edit button")) e.preventDefault();
 });
 
 taskListEl.addEventListener("keydown", (e) => {
+  if (e.target.dataset.desc) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      state.descDraft = e.target.value;
+      saveDesc();
+    } else if (e.key === "Escape") {
+      cancelDesc();
+    }
+    return;
+  }
   if (e.target.dataset.edit || e.target.dataset.editField) {
     if (e.key === "Enter") {
       if (e.target.dataset.edit) state.editDraft.text = e.target.value;
@@ -1488,70 +1715,182 @@ function buildTasksText(target) {
   return lines.join("\n");
 }
 
-// ---------- Copy for WhatsApp (*tebal*, ~coret~, _miring_) ----------
-function waTaskMeta(t) {
-  const meta = [
-    CATEGORY_LABELS[t.category],
-    PRIORITY_LABELS[t.priority],
-    t.deadline ? `tenggat ${formatDate(t.deadline)}` : null,
-  ]
-    .filter(Boolean)
-    .join(" • ");
-  return meta ? ` _(${meta})_` : "";
+// ---------- Copy for WhatsApp (*tebal*, _miring_, ~coret~) ----------
+// Hierarki laporan klien: Judul proyek & tahapan (tugas) tebal, rincian (sub) normal,
+// rincian di bawahnya miring. Pekerjaan selesai dicoret, istilah asing dimiringkan.
+
+// Istilah asing yang lazim di laporan proyek dan belum diserap ke bahasa Indonesia.
+// Kata serapan (data, model, admin, menu, filter, sistem, ...) sengaja tidak dimasukkan.
+const FOREIGN_WORDS = new Set(`
+  about acceptance access account analytics and animation app apps approval approve article assets at auth authentication authorization
+  back backend backup background banner barcode blog booking branch branding brief briefing browser bug bugfix build builder building button by
+  cache caption campaign career cart cashier chart chat checkbox checkout cloud code coding comment commit company component config configuration contact content controller cookie copywriting crash cron customer
+  dark dashboard database debug debugging default delete delivery deploy deployment design designer desktop developer development device discount domain download draft dropdown
+  e-commerce ecommerce email end endpoint environment error event export
+  factory feature feed feedback file finishing fix folder follow font footer for form framework friendly front frontend full fullstack
+  gallery gateway go
+  handling handover hardware header hero home homepage hosting hotfix
+  icon image import improvement in install installation integration interface invoice issue
+  job key keyword
+  landing language launch launching layout library light link listener live load loading log logging login logout
+  maintenance marketing marketplace meeting merge middleware migrate migration milestone mobile mockup module monitoring multi
+  navbar news notification
+  of offline on onboarding online order out
+  package page pagination password payment payload performance permission plugin point popup portfolio preview pricing print printer product production profile progress prototype pull push
+  query queue
+  real realtime register release reminder render rendering report repository repo request requirement reset response responsive restore review revision reward role rollback route router routing
+  sale sales scan scanner schedule schema scope script search section security seed seeder server service session setting setup share shipping shop sidebar sign signup slider social software source spec sprint stack staging stock storage store story style styling submit subscription supplier support sync
+  table task team template test tester testimonial testing the theme time timeline to toggle token tool tracking training trigger
+  up update upgrade upload uptime us user username
+  validation view voucher
+  webhook website widget wireframe with workflow
+`.trim().split(/\s+/));
+
+function isForeignWord(word) {
+  const w = word.toLowerCase().replace(/'s$/, "");
+  if (FOREIGN_WORDS.has(w)) return true;
+  if (w.length <= 3) return false;
+  // bentuk jamak & kata kerja: users, deployed, uploading, updated
+  if (w.endsWith("s") && FOREIGN_WORDS.has(w.slice(0, -1))) return true;
+  if (w.endsWith("ing") && (FOREIGN_WORDS.has(w.slice(0, -3)) || FOREIGN_WORDS.has(w.slice(0, -3) + "e"))) return true;
+  if (w.endsWith("ed") && (FOREIGN_WORDS.has(w.slice(0, -2)) || FOREIGN_WORDS.has(w.slice(0, -1)))) return true;
+  return false;
 }
 
-function flattenSubtasksForWa(nodes, depth, lines) {
-  (nodes || []).forEach((s) => {
-    const bullet = depth === 0 ? "◦" : "-";
-    const text = s.completed ? `~${s.text}~` : s.text;
-    lines.push("   ".repeat(depth + 1) + `_${bullet} ${text}_`);
-    flattenSubtasksForWa(s.children, depth + 1, lines);
+// Kata yang menempel pada angka, garis bawah, titik, atau garis miring adalah bagian dari
+// snake_case, URL, atau email (user_id, toko.com/login) — tidak boleh diberi penanda miring.
+function isGluedWord(before, after) {
+  return /[0-9_./@:\\]$/.test(before) || /^(?:[0-9_@]|[./:\\]\S)/.test(after);
+}
+
+// Kata asing berurutan digabung dalam satu penanda: "_payment gateway_", bukan "_payment_ _gateway_".
+function italicizeForeign(text) {
+  const parts = text.split(/([A-Za-z]+(?:'[A-Za-z]+)?)/); // indeks ganjil = kata
+  const foreignAt = (i) => isForeignWord(parts[i]) && !isGluedWord(parts[i - 1], parts[i + 1]);
+  let out = parts[0];
+  let k = 1;
+  while (k < parts.length) {
+    if (!foreignAt(k)) {
+      out += parts[k] + parts[k + 1];
+      k += 2;
+      continue;
+    }
+    let run = parts[k];
+    let j = k + 2;
+    while (j < parts.length && /^[ -]+$/.test(parts[j - 1]) && foreignAt(j)) {
+      run += parts[j - 1] + parts[j];
+      j += 2;
+    }
+    out += `_${run}_` + parts[j - 1];
+    k = j;
+  }
+  return out;
+}
+
+// Penanda miring manual: _kata_ (hanya bila diapit spasi/tanda baca, jadi snake_case aman).
+const MANUAL_ITALIC = /(^|[\s(])_([^_\n]+?)_(?=$|[\s.,;:!?)])/g;
+
+function waInline(text, inItalicLine) {
+  const src = String(text || "").replace(/\s+/g, " ").trim();
+  // Baris yang seluruhnya miring tidak boleh berisi penanda miring lagi — WhatsApp akan salah membaca.
+  if (inItalicLine) return src.replace(MANUAL_ITALIC, "$1$2");
+  let out = "";
+  let last = 0;
+  for (const m of src.matchAll(MANUAL_ITALIC)) {
+    out += italicizeForeign(src.slice(last, m.index) + m[1]) + `_${m[2]}_`;
+    last = m.index + m[0].length;
+  }
+  return out + italicizeForeign(src.slice(last));
+}
+
+const WA_RULE = "━━━━━━━━━━━━━━━━━━";
+const WA_INDENT = "      ";
+
+function waProgressBar(pct) {
+  const filled = Math.round(pct / 10);
+  return "▰".repeat(filled) + "▱".repeat(10 - filled);
+}
+
+function waStageIcon(status) {
+  if (status === "Selesai") return "✅";
+  if (status === "Proses") return "🔄";
+  return "⏳";
+}
+
+function appendWaDescription(description, indent, lines) {
+  String(description || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line, i) => lines.push(`${indent}${i === 0 ? "📝 " : "     "}${waInline(line, false)}`));
+}
+
+function appendWaNodes(nodes, depth, parentDone, lines, opts) {
+  (nodes || []).forEach((n) => {
+    const indent = WA_INDENT.repeat(depth + 1);
+    const done = parentDone || !!n.completed;
+    const italic = depth > 0;
+    let text = waInline(n.text, italic);
+    if (done) text = `~${text}~`;
+    if (italic) text = `_${text}_`;
+    const icon = depth === 0 ? (done ? "✔️" : "▫️") : "↳";
+    const price = opts.price ? nodePrice(n) : 0;
+    lines.push(`${indent}${icon} ${text}${price ? ` · ${formatRupiah(price)}` : ""}`);
+    if (opts.desc && n.description) appendWaDescription(n.description, indent + "    ", lines);
+    appendWaNodes(n.children, depth + 1, done, lines, opts);
   });
 }
 
-function appendTaskGroupWa(list, lines) {
-  const belum = list.filter((t) => !t.completed);
-  const selesai = list.filter((t) => t.completed);
+function appendWaStage(t, number, lines, opts) {
+  const status = taskStatusLabel(t);
+  const done = status === "Selesai";
+  let title = waInline(t.text, false);
+  if (done) title = `~${title}~`;
 
-  lines.push(`*BELUM SELESAI (${belum.length})*`);
-  if (!belum.length) {
-    lines.push("_(tidak ada)_");
-  } else {
-    belum.forEach((t, i) => {
-      lines.push(`${i + 1}. ${t.text}${waTaskMeta(t)}`);
-      flattenSubtasksForWa(t.subtasks, 0, lines);
-    });
-  }
+  const extras = [`${taskProgress(t)}%`];
+  if (opts.price && taskPrice(t)) extras.push(formatRupiah(taskPrice(t)));
+  if (!done && t.deadline) extras.push(`⏰ ${formatDate(t.deadline)}`);
+
+  lines.push(`${waStageIcon(status)} *${number}. ${title}* — ${extras.join(" · ")}`);
+  if (opts.desc && t.description) appendWaDescription(t.description, WA_INDENT, lines);
+  appendWaNodes(t.subtasks, 0, done, lines, opts);
+}
+
+function appendWaProject(name, list, lines, opts) {
+  const ordered = list.slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const pct = meanProgress(ordered);
+  lines.push(`📁 *${waInline(name, false)}*`);
+  lines.push(`📊 Progres: *${pct}%*  ${waProgressBar(pct)}`);
   lines.push("");
-  lines.push(`*SELESAI (${selesai.length})*`);
-  if (!selesai.length) {
-    lines.push("_(tidak ada)_");
-  } else {
-    selesai.forEach((t, i) => {
-      lines.push(`${i + 1}. ~${t.text}~${waTaskMeta(t)}`);
-      flattenSubtasksForWa(t.subtasks, 0, lines);
-    });
+  ordered.forEach((t, i) => {
+    appendWaStage(t, i + 1, lines, opts);
+    lines.push("");
+  });
+  const subtotal = ordered.reduce((sum, t) => sum + taskPrice(t), 0);
+  if (opts.price && opts.subtotal && subtotal) {
+    lines.push(`💰 Subtotal: *${formatRupiah(subtotal)}*`);
+    lines.push("");
   }
 }
 
-function buildWhatsAppText(target) {
+function buildWhatsAppText(target, opts = {}) {
   const isAll = target === "all";
   const proj = projects.find((p) => p.id === target);
   const projName = isAll ? "Semua Proyek" : proj ? proj.name : "Tanpa Proyek";
-  const scoped = isAll
-    ? tasks.filter((t) => !t.archived)
-    : tasks.filter((t) => !t.archived && (t.projectId || "") === target);
+  const scoped = reportTasks(target);
   const todayLabel = new Date().toLocaleDateString("id-ID", {
-    day: "numeric", month: "long", year: "numeric",
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
   });
 
   const lines = [];
-  lines.push(`*LAPORAN TUGAS — ${projName.toUpperCase()}*`);
-  lines.push(`_${todayLabel} • progres ${meanProgress(scoped)}%_`);
+  lines.push(opts.price ? "📋 *RINCIAN PEKERJAAN & BIAYA PROYEK*" : "📋 *LAPORAN PROGRES PROYEK*");
+  lines.push(`📅 ${todayLabel}`);
+  lines.push(WA_RULE);
   lines.push("");
 
   if (!scoped.length) {
-    lines.push("_Belum ada tugas._");
+    lines.push(`📁 *${waInline(projName, false)}*`);
+    lines.push("Belum ada tahapan pekerjaan.");
     return lines.join("\n");
   }
 
@@ -1563,17 +1902,31 @@ function buildWhatsAppText(target) {
     const noProj = scoped.filter((t) => !projects.some((p) => p.id === t.projectId));
     if (noProj.length) groups.push({ name: "Tanpa Proyek", list: noProj });
 
-    let first = true;
-    groups.forEach((g) => {
-      if (!g.list.length) return;
-      if (!first) lines.push("");
-      first = false;
-      lines.push(`*${g.name.toUpperCase()} — ${meanProgress(g.list)}%*`);
-      appendTaskGroupWa(g.list, lines);
-    });
+    groups
+      .filter((g) => g.list.length)
+      .forEach((g, i) => {
+        if (i > 0) {
+          lines.push(WA_RULE);
+          lines.push("");
+        }
+        appendWaProject(g.name, g.list, lines, { ...opts, subtotal: true });
+      });
   } else {
-    appendTaskGroupWa(scoped, lines);
+    appendWaProject(projName, scoped, lines, opts);
   }
+
+  const count = (status) => scoped.filter((t) => taskStatusLabel(t) === status).length;
+  lines.push(WA_RULE);
+  lines.push("📌 *Ringkasan*");
+  if (isAll) lines.push(`📊 Progres keseluruhan: *${meanProgress(scoped)}%*`);
+  lines.push(`✅ Selesai: ${count("Selesai")} tahap`);
+  lines.push(`🔄 Dalam proses: ${count("Proses")} tahap`);
+  lines.push(`⏳ Belum dimulai: ${count("Belum")} tahap`);
+  if (opts.price) {
+    lines.push(`💰 *Total biaya: ${formatRupiah(scoped.reduce((sum, t) => sum + taskPrice(t), 0))}*`);
+  }
+  lines.push("");
+  lines.push("Terima kasih 🙏");
 
   return lines.join("\n");
 }
@@ -1619,10 +1972,486 @@ function copyTasksAsText(target) {
 }
 
 function copyTasksAsWhatsApp(target) {
-  return copyToClipboard(buildWhatsAppText(target), copyWaBtn);
+  const opts = { price: waIncludePrice.checked, desc: waIncludeDesc.checked };
+  return copyToClipboard(buildWhatsAppText(target, opts), copyWaBtn);
 }
 
+// ---------- Master Proyek (template tahapan + rincian + harga) ----------
+// Master: { name, stages: [node], createdAt, updatedAt }, node: { id, text, price, description, children }.
+// Saat dipakai, setiap tahapan menjadi satu tugas dan rinciannya menjadi sub-tugas.
+const MASTER_RULES_HINT =
+  'Koleksi "masters" belum diizinkan di Firestore Rules.\n\n' +
+  "Buka Firebase Console → Firestore Database → Rules, tambahkan:\n\n" +
+  "match /masters/{masterId} {\n  allow read, write: if true;\n}\n\n" +
+  "Klik Publish, lalu muat ulang halaman ini.";
+
+let masterUi = { view: "list", draft: null, dirty: false, applyId: null, openDesc: new Set() };
+
+function newMasterNode() {
+  return { id: uid(), text: "", price: 0, description: "", children: [] };
+}
+
+// Salinan mendalam yang juga merapikan field yang hilang; freshIds untuk salinan baru.
+function copyMasterNodes(nodes, freshIds) {
+  return (nodes || []).map((n) => ({
+    id: freshIds || !n.id ? uid() : n.id,
+    text: n.text || "",
+    price: Number(n.price) || 0,
+    description: n.description || "",
+    children: copyMasterNodes(n.children, freshIds),
+  }));
+}
+
+function masterNodesToSubtasks(nodes) {
+  return (nodes || []).map((n) => ({
+    id: uid(),
+    text: n.text,
+    link: "",
+    completed: false,
+    price: Number(n.price) || 0,
+    description: n.description || "",
+    children: masterNodesToSubtasks(n.children),
+  }));
+}
+
+function countNodes(nodes) {
+  return (nodes || []).reduce((sum, n) => sum + 1 + countNodes(n.children), 0);
+}
+
+function locateNode(list, id) {
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].id === id) return { list, index: i, node: list[i] };
+    const found = locateNode(list[i].children || [], id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function reportMasterError(err) {
+  if (err && err.code === "permission-denied") alert(MASTER_RULES_HINT);
+  else alert("Gagal memproses master: " + (err && err.message ? err.message : err));
+}
+
+function openMasterModal() {
+  masterUi = { view: "list", draft: null, dirty: false, applyId: null, openDesc: new Set() };
+  renderMasterModal();
+  masterModalOverlay.classList.add("show");
+}
+
+function closeMasterModal() {
+  if (masterUi.view === "edit" && masterUi.dirty && !confirm("Perubahan master belum disimpan. Tutup tanpa menyimpan?")) return;
+  masterModalOverlay.classList.remove("show");
+}
+
+function openMasterEditor(draft, dirty) {
+  masterUi = { ...masterUi, view: "edit", draft, dirty, openDesc: new Set() };
+  renderMasterModal();
+  const nameInput = masterModalBody.querySelector("[data-m-name]");
+  if (nameInput) {
+    nameInput.focus();
+    nameInput.select();
+  }
+}
+
+function renderMasterModal() {
+  if (masterUi.view === "apply" && !masters.some((m) => m.id === masterUi.applyId)) masterUi.view = "list";
+  masterModalBody.innerHTML =
+    masterUi.view === "edit" ? masterEditHtml() : masterUi.view === "apply" ? masterApplyHtml() : masterListHtml();
+}
+
+function masterListHtml() {
+  const activeProject = projects.find((p) => p.id === state.project);
+  const cards = masters
+    .map((m) => {
+      const stages = m.stages || [];
+      const total = sumPrices(stages);
+      const meta = [`${stages.length} tahapan`, `${countNodes(stages) - stages.length} rincian`];
+      if (total) meta.push(formatRupiah(total));
+      return `
+        <div class="master-card">
+          <div class="master-card-main">
+            <div class="master-card-name">${escapeHtml(m.name || "(tanpa nama)")}</div>
+            <div class="master-card-meta">${meta.join(" · ")}</div>
+          </div>
+          <button type="button" class="master-use-btn" data-m="use" data-id="${m.id}">Gunakan</button>
+          <button type="button" class="task-action-btn edit" data-m="edit" data-id="${m.id}" title="Ubah master">${ICONS.edit}</button>
+          <button type="button" class="task-action-btn delete" data-m="delete" data-id="${m.id}" title="Hapus master">${ICONS.trash}</button>
+        </div>`;
+    })
+    .join("");
+
+  return `
+    <h3>Master Proyek</h3>
+    <p class="modal-sub">Template tahapan pekerjaan beserta harga. Pakai ulang untuk setiap proyek baru, lalu bagikan progres & rincian biayanya ke klien.</p>
+    ${mastersError ? `
+    <div class="master-alert">
+      <strong>Master belum bisa dibaca/disimpan.</strong> Koleksi <code>masters</code> belum diizinkan di Firestore Rules.
+      Buka Firebase Console → Firestore Database → Rules, tambahkan blok berikut, klik Publish, lalu muat ulang halaman:
+      <pre>match /masters/{masterId} {
+  allow read, write: if true;
+}</pre>
+    </div>` : ""}
+    <div class="master-toolbar">
+      <button type="button" class="master-primary-btn" data-m="new">${ICONS.plus}<span>Master Baru</span></button>
+      <button type="button" class="master-secondary-btn" data-m="from-project" ${activeProject ? "" : "disabled"}
+        title="${activeProject ? "Salin tahapan, rincian, harga & deskripsi proyek ini menjadi master" : "Pilih satu proyek di sidebar terlebih dahulu"}">
+        Jadikan master dari proyek${activeProject ? `: ${escapeHtml(activeProject.name)}` : " aktif"}
+      </button>
+    </div>
+    <div class="master-list">
+      ${cards || `<div class="master-empty">Belum ada master. Contoh: buat master <strong>Laravel 12</strong> dengan tahapan MVC, <em>Building</em>, Migrasi, <em>Testing</em>, <em>Deploy</em>, dan <em>Domain</em>, lalu isi rincian & harganya.</div>`}
+    </div>`;
+}
+
+function masterRowsHtml(nodes, depth, prefix) {
+  return nodes
+    .map((n, i) => {
+      const num = prefix ? `${prefix}.${i + 1}` : String(i + 1);
+      const auto = sumPrices(n.children);
+      const descOpen = masterUi.openDesc.has(n.id);
+      return `
+        <div class="mrow ${depth === 0 ? "stage" : ""}" style="--depth:${depth}">
+          <span class="mrow-num">${num}</span>
+          <input type="text" class="mrow-text" data-node="${n.id}" data-f="text" value="${escapeAttr(n.text)}" placeholder="${depth === 0 ? "Nama tahapan, mis. MVC" : "Rincian pekerjaan"}" />
+          <input type="text" class="mrow-price" inputmode="numeric" data-node="${n.id}" data-f="price" value="${formatNumber(auto || Number(n.price) || 0)}" placeholder="0" ${auto ? `disabled title="Otomatis: jumlah harga rincian"` : ""} />
+          <div class="mrow-actions">
+            <button type="button" class="task-action-btn desc ${n.description ? "has" : ""} ${descOpen ? "open" : ""}" data-m="node-desc" data-node="${n.id}" title="Deskripsi">${ICONS.note}</button>
+            <button type="button" class="task-action-btn addsub" data-m="node-add" data-node="${n.id}" title="Tambah rincian di dalamnya">${ICONS.plus}</button>
+            <button type="button" class="task-action-btn" data-m="node-up" data-node="${n.id}" title="Naikkan" ${i === 0 ? "disabled" : ""}>${ICONS.up}</button>
+            <button type="button" class="task-action-btn" data-m="node-down" data-node="${n.id}" title="Turunkan" ${i === nodes.length - 1 ? "disabled" : ""}>${ICONS.down}</button>
+            <button type="button" class="task-action-btn delete" data-m="node-del" data-node="${n.id}" title="Hapus">${ICONS.trash}</button>
+          </div>
+        </div>
+        ${descOpen ? `<textarea class="mrow-desc" style="--depth:${depth}" data-node="${n.id}" data-f="description" rows="3" placeholder="Deskripsi / penjelasan pekerjaan...">${escapeHtml(n.description || "")}</textarea>` : ""}
+        ${masterRowsHtml(n.children || [], depth + 1, num)}`;
+    })
+    .join("");
+}
+
+function masterEditHtml() {
+  const d = masterUi.draft;
+  return `
+    <h3>${d.id ? "Ubah Master" : "Master Baru"}</h3>
+    <p class="modal-sub">Tahapan (nomor 1, 2, 3) menjadi tugas, rincian di dalamnya menjadi sub-tugas. Tekan Enter untuk menambah baris berikutnya. Jika rincian diberi harga, harga tahapan otomatis menjadi jumlahnya.</p>
+    <input type="text" class="master-name-input" data-m-name="1" value="${escapeAttr(d.name)}" placeholder="Nama master, mis. Laravel 12" />
+    <div class="master-tree-head"><span></span><span>Tahapan & rincian</span><span>Harga (Rp)</span><span></span></div>
+    <div class="master-tree">${masterRowsHtml(d.stages, 0, "")}</div>
+    <button type="button" class="master-add-root" data-m="add-root">${ICONS.plus}<span>Tambah Tahapan</span></button>
+    <div class="master-footer">
+      <div class="master-total">Total: <strong id="masterTotal">${formatRupiah(sumPrices(d.stages))}</strong></div>
+      <button type="button" class="edit-cancel-btn" data-m="back">Batal</button>
+      <button type="button" class="edit-save-btn" data-m="save">${ICONS.check}<span>Simpan Master</span></button>
+    </div>`;
+}
+
+function masterApplyHtml() {
+  const m = masters.find((m) => m.id === masterUi.applyId);
+  const stages = m.stages || [];
+  const total = sumPrices(stages);
+  const current = projects.some((p) => p.id === state.project) ? state.project : "__new";
+  return `
+    <h3>Gunakan Master “${escapeHtml(m.name)}”</h3>
+    <p class="modal-sub">${stages.length} tahapan dan ${countNodes(stages) - stages.length} rincian akan ditambahkan sebagai tugas${total ? `, total ${formatRupiah(total)}` : ""}.</p>
+    <ol class="master-preview">
+      ${stages.map((s) => `<li><span>${escapeHtml(s.text)}</span>${nodePrice(s) ? `<span class="master-preview-price">${formatRupiah(nodePrice(s))}</span>` : ""}</li>`).join("")}
+    </ol>
+    <label class="master-label" for="masterApplyTarget">Terapkan ke proyek</label>
+    <select id="masterApplyTarget" class="master-select">
+      <option value="__new" ${current === "__new" ? "selected" : ""}>+ Proyek baru…</option>
+      ${projects.map((p) => `<option value="${p.id}" ${p.id === current ? "selected" : ""}>${escapeHtml(p.name)}</option>`).join("")}
+    </select>
+    <input type="text" id="masterApplyName" class="master-name-input" placeholder="Nama proyek baru, mis. Toko Budi" ${current === "__new" ? "" : `style="display:none;"`} />
+    <div class="master-footer">
+      <button type="button" class="edit-cancel-btn" data-m="back">Kembali</button>
+      <button type="button" class="edit-save-btn" data-m="apply-confirm">${ICONS.check}<span>Terapkan</span></button>
+    </div>`;
+}
+
+function focusMasterNode(id, selector = ".mrow-text") {
+  const el = masterModalBody.querySelector(`${selector}[data-node="${id}"]`);
+  if (el) el.focus();
+}
+
+// Perbarui harga induk (otomatis) & total di tempat, tanpa render ulang yang akan membuang fokus ketikan.
+function syncMasterPrices() {
+  const walk = (nodes) =>
+    nodes.forEach((n) => {
+      const el = masterModalBody.querySelector(`.mrow-price[data-node="${n.id}"]`);
+      const auto = sumPrices(n.children);
+      if (el && el !== document.activeElement) {
+        el.disabled = auto > 0;
+        el.title = auto > 0 ? "Otomatis: jumlah harga rincian" : "";
+        el.value = formatNumber(auto || Number(n.price) || 0);
+      }
+      walk(n.children || []);
+    });
+  walk(masterUi.draft.stages);
+  const totalEl = masterModalBody.querySelector("#masterTotal");
+  if (totalEl) totalEl.textContent = formatRupiah(sumPrices(masterUi.draft.stages));
+}
+
+function addMasterSibling(nodeId) {
+  const loc = locateNode(masterUi.draft.stages, nodeId);
+  if (!loc) return;
+  const node = newMasterNode();
+  loc.list.splice(loc.index + 1, 0, node);
+  masterUi.dirty = true;
+  renderMasterModal();
+  focusMasterNode(node.id);
+}
+
+function pruneMasterNodes(nodes) {
+  return nodes
+    .map((n) => ({
+      ...n,
+      text: n.text.trim(),
+      description: (n.description || "").trim(),
+      children: pruneMasterNodes(n.children || []),
+    }))
+    .filter((n) => n.text || n.children.length);
+}
+
+function hasUnnamedNode(nodes) {
+  return nodes.some((n) => !n.text || hasUnnamedNode(n.children));
+}
+
+async function saveMaster(btn) {
+  const d = masterUi.draft;
+  const name = d.name.trim();
+  if (!name) {
+    alert('Beri nama master terlebih dahulu, misalnya "Laravel 12".');
+    masterModalBody.querySelector("[data-m-name]").focus();
+    return;
+  }
+  const stages = pruneMasterNodes(d.stages);
+  if (!stages.length) {
+    alert("Tambahkan minimal satu tahapan.");
+    return;
+  }
+  if (hasUnnamedNode(stages)) {
+    alert("Ada baris tanpa nama yang masih memiliki rincian. Lengkapi dulu namanya.");
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    const now = Date.now();
+    if (d.id) await updateDoc(doc(db, "masters", d.id), { name, stages, updatedAt: now });
+    else await addDoc(mastersCollection, { name, stages, createdAt: now, updatedAt: now });
+    masterUi = { ...masterUi, view: "list", draft: null, dirty: false };
+    renderMasterModal();
+  } catch (err) {
+    btn.disabled = false;
+    reportMasterError(err);
+  }
+}
+
+function resetNavFilter() {
+  state.navFilter = "all";
+  document.querySelectorAll(".nav-item[data-filter]").forEach((b) =>
+    b.classList.toggle("active", b.dataset.filter === "all")
+  );
+}
+
+async function applyMaster(btn) {
+  const m = masters.find((m) => m.id === masterUi.applyId);
+  if (!m) return;
+  const target = masterModalBody.querySelector("#masterApplyTarget").value;
+  const nameInput = masterModalBody.querySelector("#masterApplyName");
+  const newName = nameInput.value.trim();
+  if (target === "__new" && !newName) {
+    alert("Isi nama proyek baru terlebih dahulu.");
+    nameInput.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  try {
+    const projectId =
+      target === "__new"
+        ? (await addDoc(projectsCollection, { name: newName, createdAt: Date.now() })).id
+        : target;
+    const base = Date.now();
+    const today = new Date(base).toISOString().slice(0, 10);
+    await Promise.all(
+      (m.stages || []).map((s, i) =>
+        addDoc(tasksCollection, {
+          text: s.text,
+          description: s.description || "",
+          price: Number(s.price) || 0,
+          projectId,
+          category: "kerja",
+          priority: "medium",
+          dueDate: today,
+          link: "",
+          deadline: "",
+          completed: false,
+          completedAt: null,
+          archived: false,
+          subtasks: masterNodesToSubtasks(s.children),
+          createdAt: base + i,
+        })
+      )
+    );
+    masterModalOverlay.classList.remove("show");
+    state.project = projectId;
+    resetNavFilter();
+    // Tahapan harus tampil berurutan (1, 2, 3...), bukan terbaru di atas.
+    setSort("oldest");
+    render();
+  } catch (err) {
+    btn.disabled = false;
+    alert("Gagal menerapkan master. Periksa koneksi lalu coba lagi.");
+  }
+}
+
+async function handleMasterAction(action, btn) {
+  const { id, node: nodeId } = btn.dataset;
+  const d = masterUi.draft;
+
+  if (action === "new") {
+    openMasterEditor({ name: "", stages: [newMasterNode()] }, false);
+  } else if (action === "edit") {
+    const m = masters.find((m) => m.id === id);
+    if (m) openMasterEditor({ id: m.id, name: m.name || "", stages: copyMasterNodes(m.stages, false) }, false);
+  } else if (action === "from-project") {
+    const p = projects.find((p) => p.id === state.project);
+    if (!p) return;
+    const stages = reportTasks(p.id)
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      .map((t) => ({
+        id: uid(),
+        text: t.text,
+        price: Number(t.price) || 0,
+        description: t.description || "",
+        children: copyMasterNodes(t.subtasks, true),
+      }));
+    openMasterEditor({ name: p.name, stages: stages.length ? stages : [newMasterNode()] }, true);
+  } else if (action === "delete") {
+    const m = masters.find((m) => m.id === id);
+    if (!m || !confirm(`Hapus master "${m.name}"? Proyek yang sudah memakai master ini tidak terpengaruh.`)) return;
+    try {
+      await deleteDoc(doc(db, "masters", id));
+    } catch (err) {
+      reportMasterError(err);
+    }
+  } else if (action === "use") {
+    masterUi = { ...masterUi, view: "apply", applyId: id };
+    renderMasterModal();
+    const nameInput = masterModalBody.querySelector("#masterApplyName");
+    if (nameInput && nameInput.style.display !== "none") nameInput.focus();
+  } else if (action === "back") {
+    if (masterUi.view === "edit" && masterUi.dirty && !confirm("Buang perubahan master yang belum disimpan?")) return;
+    masterUi = { ...masterUi, view: "list", draft: null, dirty: false };
+    renderMasterModal();
+  } else if (action === "save") {
+    await saveMaster(btn);
+  } else if (action === "apply-confirm") {
+    await applyMaster(btn);
+  } else if (action === "add-root") {
+    const node = newMasterNode();
+    d.stages.push(node);
+    masterUi.dirty = true;
+    renderMasterModal();
+    focusMasterNode(node.id);
+  } else {
+    const loc = locateNode(d.stages, nodeId);
+    if (!loc) return;
+    const { list, index, node } = loc;
+    if (action === "node-add") {
+      const child = newMasterNode();
+      node.children.push(child);
+      masterUi.dirty = true;
+      renderMasterModal();
+      focusMasterNode(child.id);
+      return;
+    }
+    if (action === "node-desc") {
+      const open = !masterUi.openDesc.has(node.id);
+      if (open) masterUi.openDesc.add(node.id);
+      else masterUi.openDesc.delete(node.id);
+      renderMasterModal();
+      if (open) focusMasterNode(node.id, ".mrow-desc");
+      return;
+    }
+    if (action === "node-del") {
+      const nested = countNodes(node.children);
+      if (nested && !confirm(`Hapus "${node.text || "baris ini"}" beserta ${nested} rinciannya?`)) return;
+      list.splice(index, 1);
+      if (!d.stages.length) d.stages.push(newMasterNode());
+    } else if (action === "node-up" && index > 0) {
+      [list[index - 1], list[index]] = [list[index], list[index - 1]];
+    } else if (action === "node-down" && index < list.length - 1) {
+      [list[index + 1], list[index]] = [list[index], list[index + 1]];
+    }
+    masterUi.dirty = true;
+    renderMasterModal();
+  }
+}
+
+masterBtn.addEventListener("click", openMasterModal);
+masterModalClose.addEventListener("click", closeMasterModal);
+masterModalOverlay.addEventListener("click", (e) => {
+  if (e.target === masterModalOverlay) closeMasterModal();
+});
+
+masterModalBody.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-m]");
+  if (btn && !btn.disabled) handleMasterAction(btn.dataset.m, btn);
+});
+
+masterModalBody.addEventListener("input", (e) => {
+  const el = e.target;
+  if (!masterUi.draft) return;
+  if (el.dataset.mName) {
+    masterUi.draft.name = el.value;
+    masterUi.dirty = true;
+    return;
+  }
+  const field = el.dataset.f;
+  const loc = field && locateNode(masterUi.draft.stages, el.dataset.node);
+  if (!loc) return;
+  loc.node[field] = field === "price" ? parsePrice(el.value) : el.value;
+  masterUi.dirty = true;
+  if (field === "price") syncMasterPrices();
+});
+
+masterModalBody.addEventListener("change", (e) => {
+  if (e.target.dataset.f === "price") e.target.value = formatNumber(parsePrice(e.target.value));
+  if (e.target.id === "masterApplyTarget") {
+    const nameInput = masterModalBody.querySelector("#masterApplyName");
+    nameInput.style.display = e.target.value === "__new" ? "" : "none";
+    if (e.target.value === "__new") nameInput.focus();
+  }
+});
+
+masterModalBody.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (e.target.dataset.f === "text") {
+    e.preventDefault();
+    addMasterSibling(e.target.dataset.node);
+  } else if (e.target.id === "masterApplyName") {
+    e.preventDefault();
+    masterModalBody.querySelector('[data-m="apply-confirm"]').click();
+  }
+});
+
 // ---------- Init ----------
+onSnapshot(
+  mastersCollection,
+  (snapshot) => {
+    masters = snapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || "", "id"));
+    mastersError = null;
+    if (masterModalOverlay.classList.contains("show") && masterUi.view === "list") renderMasterModal();
+  },
+  (err) => {
+    mastersError = err;
+    if (masterModalOverlay.classList.contains("show") && masterUi.view === "list") renderMasterModal();
+  }
+);
+
 onSnapshot(projectsCollection, (snapshot) => {
   projects = snapshot.docs
     .map((d) => ({ id: d.id, ...d.data() }))
